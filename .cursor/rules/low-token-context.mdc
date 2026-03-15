@@ -1,0 +1,19 @@
+---
+description: Minimize context and token usage across the repo
+alwaysApply: true
+---
+
+# Low-Token Context Rule
+
+- Default to the minimum context needed to answer or act accurately.
+- Do not read large files in full unless strictly necessary.
+- Prefer `rg` and `Glob` before `ReadFile` when locating code or docs.
+- When reading files, use targeted offsets/limits whenever possible.
+- Do not restate large parts of prior discussion unless needed for the current task.
+- Keep intermediary updates short, but do not omit useful progress updates when the task is long-running or unclear.
+- Avoid broad repo exploration when the request is narrow.
+- Prefer small focused edits over large rewrites.
+- When proposing plans, keep them compact and only expand if asked.
+- For terminal work, run only the commands needed for the next decision.
+- Do not include long inventories of unchanged files, logs, or command output in responses.
+- If a task needs deeper context, gather it incrementally instead of front-loading it, but do not avoid necessary context when accuracy depends on it.

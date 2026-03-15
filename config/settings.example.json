@@ -1,0 +1,42 @@
+{
+  "scheduler": {
+    "timezone": "America/Santo_Domingo"
+  },
+  "platforms": {
+    "facebookPage": {
+      "enabled": true,
+      "minDaysBetweenPosts": 1,
+      "maxPostsPerDay": 1,
+      "maxPostsPer7Days": 5,
+      "randomDelaySeconds": [60, 180]
+    },
+    "reddit": {
+      "enabled": true,
+      "minDaysBetweenPosts": 2,
+      "maxPostsPerDay": 1,
+      "maxPostsPer7Days": 3,
+      "randomDelaySeconds": [60, 180]
+    },
+    "facebookGroups": {
+      "enabled": true,
+      "minDaysBetweenPosts": 3,
+      "maxPostsPerDay": 1,
+      "maxPostsPer7Days": 2,
+      "randomDelaySeconds": [120, 300]
+    },
+    "telegram": {
+      "enabled": true,
+      "minDaysBetweenPosts": 1,
+      "maxPostsPerDay": 1,
+      "maxPostsPer7Days": 5,
+      "randomDelaySeconds": [30, 90]
+    },
+    "whatsappWeb": {
+      "enabled": true,
+      "minDaysBetweenPosts": 4,
+      "maxPostsPerDay": 1,
+      "maxPostsPer7Days": 2,
+      "randomDelaySeconds": [180, 420]
+    }
+  }
+}

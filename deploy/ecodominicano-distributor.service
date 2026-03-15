@@ -1,0 +1,16 @@
+[Unit]
+Description=EcoDominicano Content Distributor
+After=network.target
+
+[Service]
+Type=oneshot
+User=ecodist
+WorkingDirectory=/opt/ecodominicano-distributor
+EnvironmentFile=/opt/ecodominicano-distributor/config/.env
+Environment=NODE_ENV=production
+ExecStart=/opt/ecodominicano-distributor/run-distribute.sh
+StandardOutput=append:/opt/ecodominicano-distributor/logs/distributor.log
+StandardError=append:/opt/ecodominicano-distributor/logs/distributor.log
+
+[Install]
+WantedBy=multi-user.target

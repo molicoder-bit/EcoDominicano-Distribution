@@ -1,0 +1,10 @@
+---
+description: Run commands myself; only ask user for things I cannot do
+alwaysApply: true
+---
+
+# Run, Don't Ask
+
+- I have access to PowerShell, Terminal, SSH, and the VM. Run commands myself instead of asking the user to run them.
+- Only ask the user to do something when I genuinely cannot do it (e.g. physical actions, scanning QR codes with their phone, entering credentials they hold, approving prompts on their machine).
+- When giving instructions, specify whether a command runs on Windows (PowerShell/Terminal) or inside the VM.

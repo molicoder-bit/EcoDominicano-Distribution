@@ -1,0 +1,20 @@
+{
+  "name": "ecodominicano-distributor",
+  "version": "0.1.0",
+  "description": "Content distribution automation for EcoDominicano",
+  "private": true,
+  "scripts": {
+    "distribute": "node scripts/distribute.js",
+    "whatsapp:login": "xvfb-run -a node scripts/whatsapp-login.js",
+    "whatsapp:scan": "xvfb-run -a node scripts/wa-group-scanner.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.6.0",
+    "dotenv": "^16.4.5",
+    "rss-parser": "^3.13.0",
+    "playwright": "^1.49.0"
+  }
+}

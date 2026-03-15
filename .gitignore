@@ -1,0 +1,40 @@
+# Secrets
+config/.env
+*.pem
+*.key
+
+# Dependencies
+node_modules/
+venv/
+__pycache__/
+
+# SQLite database
+data/
+data/*.db
+
+# State (contains session data, may contain tokens)
+state/processed.json
+state/last-fetch.json
+state/wa-session/
+state/*.json
+state/browser-sessions/
+state/exports/
+
+# Logs
+logs/*.log
+logs/*.png
+logs/*.json
+logs/failed-posts.json
+
+# WhatsApp QR (sensitive)
+qr-whatsapp.png
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
