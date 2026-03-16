@@ -85,21 +85,26 @@ async function main() {
     log('QR_CHECK', 'No QR visible. Page might show chat list (already logged in) or loading.');
   }
 
-  log('AUTH', 'Waiting for login indicators (up to 90s)...');
-  const loggedIn = await page.waitForSelector('[data-testid="default-user"]', { timeout: 90000 }).catch(() => null)
-    || await page.waitForSelector('#pane-side', { timeout: 90000 }).catch(() => null);
+  log('AUTH', 'Waiting for login indicators (up to 5 min for QR scan)...');
+  const loggedIn = await page.waitForSelector('#pane-side', { timeout: 300000 }).catch(() => null);
 
   if (loggedIn) {
-    log('AUTH', 'Logged in. Session saved.');
+    log('AUTH', 'Logged in successfully. Waiting for chats to sync...');
+    // Wait until chat rows appear — that means WhatsApp has synced enough to be usable
+    await page.waitForSelector('[data-testid="cell-frame-container"]', { timeout: 120000 })
+      .catch(() => log('AUTH', 'Chat rows did not appear in 2 min — may still be syncing.'));
+    const chatCount = await page.locator('[data-testid="cell-frame-container"]').count();
+    log('AUTH', `Chats visible in sidebar: ${chatCount}. You can now close this window.`);
+    log('AUTH', 'Keep the window open longer if you want more chats to sync before scanning.');
   } else {
-    log('AUTH', 'No login yet. Waiting 2 min for QR scan...');
-    await page.waitForSelector('#pane-side', { timeout: 120000 }).catch(() => {});
-    log('AUTH', 'Done.');
+    log('AUTH', 'Login not detected after 5 minutes. Closing.');
+    await context.close();
+    return;
   }
 
-  log('CLEANUP', 'Closing browser...');
-  await context.close();
-  log('DONE', 'whatsapp-login finished');
+  // Keep open until user closes the window or presses Ctrl+C
+  await context.waitForEvent('close', { timeout: 0 }).catch(() => {});
+  log('DONE', 'Browser closed. Session saved.');
 }
 
 main().catch((e) => {
