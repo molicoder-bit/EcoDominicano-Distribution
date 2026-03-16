@@ -68,14 +68,19 @@ async function scanGroups(options = {}) {
   clearInterval(progressInterval);
   log('Chat list loaded.');
 
-  // Try clicking "Groups" filter to only show groups — saves scanning time
-  const groupsFilter = page.locator('button:has-text("Groups"), [data-testid="chat-list-filter-tab-groups"]').first();
-  if (await groupsFilter.count() > 0) {
-    log('Found "Groups" filter — clicking it to show only groups...');
-    await groupsFilter.click();
-    await page.waitForTimeout(1000);
-  } else {
-    log('No "Groups" filter found — will scan all chats.');
+  // Try clicking "Groups" filter — non-fatal if it fails
+  try {
+    const groupsFilter = page.locator('button:has-text("Groups"), [data-testid="chat-list-filter-tab-groups"]').first();
+    if (await groupsFilter.count() > 0) {
+      await groupsFilter.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+      await groupsFilter.click({ force: true, timeout: 5000 });
+      await page.waitForTimeout(1000);
+      log('Groups filter applied — showing groups only.');
+    } else {
+      log('No Groups filter found — scanning all chats.');
+    }
+  } catch {
+    log('Groups filter click failed — scanning all chats.');
   }
 
   await page.waitForTimeout(1500);
