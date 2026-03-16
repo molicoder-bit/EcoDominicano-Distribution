@@ -73,7 +73,8 @@ def build_whatsapp_tab(parent):
     btn_frame.pack(fill="x", padx=15, pady=8)
 
     scan_status = tk.Label(btn_frame, text="", font=("Arial", 12), bg="#f5f5f5")
-    distribute_status = tk.Label(btn_frame, text="", font=("Arial", 12), bg="#f5f5f5")
+    test_status = tk.Label(btn_frame, text="", font=("Arial", 12), bg="#f5f5f5")
+    live_status = tk.Label(btn_frame, text="", font=("Arial", 12), bg="#f5f5f5")
 
     def do_login():
         open_terminal("WhatsApp Login", build_cmd("npm run whatsapp:login"))
@@ -141,7 +142,7 @@ def build_whatsapp_tab(parent):
         run_in_background(build_cmd("npm run whatsapp:scan"), on_line=on_line, on_done=on_done)
 
     def do_test():
-        distribute_status.config(text="⏳", fg="orange")
+        test_status.config(text="⏳", fg="orange")
         test_btn.config(state="disabled")
         distribute_btn.config(state="disabled")
         status_var.set("Running test distribution...")
@@ -158,10 +159,10 @@ def build_whatsapp_tab(parent):
             test_btn.config(state="normal")
             distribute_btn.config(state="normal")
             if returncode == 0:
-                distribute_status.config(text="✅", fg="green")
+                test_status.config(text="✅", fg="green")
                 status_var.set("Test complete!")
             else:
-                distribute_status.config(text="❌", fg="red")
+                test_status.config(text="❌", fg="red")
                 status_var.set("Test failed. Check the log.")
 
         run_in_background(build_cmd("node scripts/distribute.js --test"), on_line=on_line, on_done=on_done)
@@ -169,7 +170,7 @@ def build_whatsapp_tab(parent):
     def do_live():
         if not messagebox.askyesno("Confirm LIVE Run", "Send REAL messages to groups now?"):
             return
-        distribute_status.config(text="⏳", fg="orange")
+        live_status.config(text="⏳", fg="orange")
         test_btn.config(state="disabled")
         distribute_btn.config(state="disabled")
         status_var.set("Running LIVE distribution...")
@@ -186,10 +187,10 @@ def build_whatsapp_tab(parent):
             test_btn.config(state="normal")
             distribute_btn.config(state="normal")
             if returncode == 0:
-                distribute_status.config(text="✅", fg="green")
+                live_status.config(text="✅", fg="green")
                 status_var.set("LIVE distribution complete!")
             else:
-                distribute_status.config(text="❌", fg="red")
+                live_status.config(text="❌", fg="red")
                 status_var.set("Distribution failed. Check the log.")
 
         run_in_background(build_cmd("npm run distribute"), on_line=on_line, on_done=on_done)
@@ -202,10 +203,10 @@ def build_whatsapp_tab(parent):
 
     # Layout buttons with status icons
     for i, (btn, icon_lbl) in enumerate([
-        (login_btn,  tk.Label(btn_frame, text="", bg="#f5f5f5", font=("Arial", 14))),
-        (scan_btn,   scan_status),
-        (test_btn,   distribute_status),
-        (distribute_btn, tk.Label(btn_frame, text="", bg="#f5f5f5")),
+        (login_btn,      tk.Label(btn_frame, text="", bg="#f5f5f5")),
+        (scan_btn,       scan_status),
+        (test_btn,       test_status),
+        (distribute_btn, live_status),
     ]):
         btn.grid(row=i, column=0, sticky="w", pady=3)
         icon_lbl.grid(row=i, column=1, padx=8)
