@@ -105,12 +105,12 @@ async function scanGroups(session, limit = 5, log = console.log) {
 
   // Texts that are status/preview lines, never real group names
   const SKIP_PATTERNS = [
-    /loading[…\.]/i,
-    /cargando[…\.]/i,
-    /is typing[…\.]/i,
-    /está escribiendo[…\.]/i,
-    /está escrevendo[…\.]/i,
-    /^[…\.]+$/,
+    /^loading/i,           // "Loading…", "Loading...", "Loading"
+    /^cargando/i,          // Spanish loading
+    /is typing/i,          // "Someone is typing…"
+    /está escribiendo/i,   // Spanish typing
+    /está escrevendo/i,    // Portuguese typing
+    /^[…\.\s]+$/,          // Only dots/ellipsis
   ];
 
   // Use per-row first-span: each chat row has multiple span[title] elements.
