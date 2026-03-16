@@ -13,8 +13,8 @@ const SESSION_PATH = process.env.WA_SESSION_PATH ||
   path.join(__dirname, '../../state/browser-sessions/whatsapp');
 const BLOCKLIST = (process.env.WA_GROUP_BLOCKLIST || '')
   .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-const LINK_PREVIEW_MIN = parseInt(process.env.WA_LINK_PREVIEW_MIN || '3000', 10);
-const LINK_PREVIEW_MAX = parseInt(process.env.WA_LINK_PREVIEW_MAX || '5000', 10);
+const LINK_PREVIEW_MIN = parseInt(process.env.WA_LINK_PREVIEW_MIN || '7000', 10);
+const LINK_PREVIEW_MAX = parseInt(process.env.WA_LINK_PREVIEW_MAX || '10000', 10);
 const LOAD_TIMEOUT = parseInt(process.env.WA_CHAT_LOAD_TIMEOUT || '120', 10) * 1000;
 
 function previewDelay(text) {
