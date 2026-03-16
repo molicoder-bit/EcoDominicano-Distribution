@@ -129,11 +129,19 @@ async function scanGroups(options = {}) {
         await page.waitForTimeout(1200);
       }
 
-      // Check body text for member count — matches "participants", "members", "miembros"
+      // Check body text for member count with locale variants
       const pageText = await page.textContent('body').catch(() => '');
-      const match = pageText.match(/(\d[\d,]*)\s*(participants?|members?|miembros?)/i);
+      const normalized = pageText.replace(/\u00A0/g, ' ');
+      const countWords = '(participants?|participantes?|members?|miembros?|integrantes?)';
+      let match = normalized.match(new RegExp(`(\\d[\\d.,\\s]*)\\s*${countWords}`, 'i'));
+      if (!match) {
+        // Some UIs render "members 123" instead of "123 members"
+        match = normalized.match(new RegExp(`${countWords}\\s*(\\d[\\d.,\\s]*)`, 'i'));
+      }
       if (match) {
-        const count = parseInt(match[1].replace(/,/g, ''), 10);
+        const rawNumber = match[1] && /\d/.test(match[1]) ? match[1] : match[2];
+        const digits = (rawNumber || '').replace(/[^\d]/g, '');
+        const count = parseInt(digits, 10);
         groups.push({ name, memberCount: count });
         log(`Group: ${name} (${count} participants)`);
       } else {
