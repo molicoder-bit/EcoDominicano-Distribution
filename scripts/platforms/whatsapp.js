@@ -225,6 +225,43 @@ async function sendToChannel(session, channelName, message, log = console.log) {
   return { success: true };
 }
 
+// ─── Send a message to a phone number in the open session ─────────────────────
+// Uses web.whatsapp.com/send?phone=... to open the DM without needing a contact name
+async function sendToPhone(session, phone, message, log = console.log) {
+  const { page } = session;
+
+  // Strip everything except digits
+  const digits = phone.replace(/\D/g, '');
+  const url = `https://web.whatsapp.com/send?phone=${digits}`;
+
+  log(`WA: opening DM via URL for ${phone}...`);
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+  // Wait for the message input to appear (WhatsApp will open the chat)
+  let input = null;
+  try {
+    await page.waitForSelector(INPUT_SELECTORS[0], { timeout: 30000 });
+    input = await findInput(page);
+  } catch {
+    // Try other selectors
+    input = await findInput(page);
+  }
+
+  if (!input) {
+    return { success: false, error: 'phone_input_not_found', detail: phone };
+  }
+
+  await input.click();
+  await page.waitForTimeout(500);
+  await page.keyboard.type(message, { delay: 30 });
+  await page.waitForTimeout(previewDelay(message));
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(1500);
+
+  log(`WA: test message sent to ${phone}`);
+  return { success: true };
+}
+
 // ─── Legacy single-post API (kept for standalone use) ─────────────────────────
 async function post(article, opts = {}) {
   const { log: logger = console.log, groupName, messageOverride } = opts;
@@ -246,4 +283,4 @@ async function post(article, opts = {}) {
   }
 }
 
-module.exports = { openSession, scanGroups, sendToChat, sendToChannel, post };
+module.exports = { openSession, scanGroups, sendToChat, sendToChannel, sendToPhone, post };

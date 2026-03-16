@@ -31,6 +31,7 @@ const LOCK_FILE = path.join(__dirname, '../state/run.lock');
 const WA_INTER_DELAY_MIN = parseInt(process.env.WA_INTER_MESSAGE_DELAY_MIN || '300', 10) * 1000;
 const WA_INTER_DELAY_MAX = parseInt(process.env.WA_INTER_MESSAGE_DELAY_MAX || '600', 10) * 1000;
 const WA_CHANNEL_NAME = process.env.WA_CHANNEL_NAME || 'EcoDominicano | Noticias RD';
+const WA_TEST_PHONE = process.env.WA_TEST_PHONE || '';
 
 function randomBetween(min, max) {
   return min + Math.floor(Math.random() * (max - min + 1));
@@ -72,23 +73,45 @@ function loadSettings() {
 }
 
 async function runWhatsAppMultiGroup(article, _poster, runId, _settings, log, isTest = false) {
-  // Build the message BEFORE opening the browser (Ollama can take a few seconds)
-  let message;
+  // TEST MODE: send "Probando..." to the owner's own number only — never to real groups
   if (isTest) {
-    message = 'Probando...';
-  } else {
+    const testPhone = WA_TEST_PHONE;
+    if (!testPhone) {
+      log('whatsappWeb test: WA_TEST_PHONE not set — skipping');
+      return;
+    }
+    let session;
     try {
-      const prompt = buildNewsPrompt(article);
-      message = await ollamaGenerate(prompt);
-      if (article.url && !message.includes(article.url)) {
-        message = `${message.trim()}\n\n${article.url}`;
+      session = await wa.openSession({ log });
+      log(`whatsappWeb test: sending "Probando..." to ${testPhone}`);
+      const result = await wa.sendToPhone(session, testPhone, 'Probando...', log);
+      if (result.success) {
+        log(`whatsappWeb test: message delivered to ${testPhone} ✓`);
+      } else {
+        log(`whatsappWeb test: failed — ${result.error}`);
       }
     } catch (e) {
-      log(`whatsappWeb ollama failed: ${e.message} — using fallback`);
-      message = article.url
-        ? `${article.title || 'Sin título'}\n\n${article.url}`
-        : (article.title || 'Sin título');
+      log(`whatsappWeb test: error — ${e.message}`);
+    } finally {
+      if (session) await session.context.close().catch(() => {});
+      log('whatsappWeb: browser closed.');
     }
+    return;
+  }
+
+  // LIVE MODE — build the message before opening browser
+  let message;
+  try {
+    const prompt = buildNewsPrompt(article);
+    message = await ollamaGenerate(prompt);
+    if (article.url && !message.includes(article.url)) {
+      message = `${message.trim()}\n\n${article.url}`;
+    }
+  } catch (e) {
+    log(`whatsappWeb ollama failed: ${e.message} — using fallback`);
+    message = article.url
+      ? `${article.title || 'Sin título'}\n\n${article.url}`
+      : (article.title || 'Sin título');
   }
 
   // Open ONE browser session for the entire WhatsApp run
@@ -190,7 +213,8 @@ async function run() {
       const config = platformConfigs[platform];
       if (!config) continue;
 
-      const check = isTest ? { eligible: true } : isEligible(platform, config, article.url);
+      // manual mode bypasses time-based cooldowns (user explicitly triggered it)
+      const check = (isTest || mode === 'manual') ? { eligible: true } : isEligible(platform, config, article.url);
       if (!check.eligible) {
         log(`platform=${platform} skipped: ${check.reason} ${check.detail || ''}`);
         db.recordRunPlatform(runId, platform, check.reason, null, check.detail);
