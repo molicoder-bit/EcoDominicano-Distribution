@@ -96,35 +96,66 @@ async function scanGroups(session, limit = 5, log = console.log) {
     const btn = page.locator('button:has-text("Groups"), [data-testid="chat-list-filter-tab-groups"]').first();
     if (await btn.count() > 0) {
       await btn.click({ force: true, timeout: 5000 });
-      await page.waitForTimeout(800);
+      await page.waitForTimeout(1000);
       log('WA: Groups filter applied.');
     }
   } catch { /* non-fatal */ }
 
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(800);
 
-  // Placeholder texts WhatsApp shows while chats are still loading
-  const LOADING_PLACEHOLDERS = new Set([
-    'loading…', 'loading...', 'cargando…', 'cargando...', '…', '...',
-  ]);
+  // Texts that are status/preview lines, never real group names
+  const SKIP_PATTERNS = [
+    /loading[…\.]/i,
+    /cargando[…\.]/i,
+    /is typing[…\.]/i,
+    /está escribiendo[…\.]/i,
+    /está escrevendo[…\.]/i,
+    /^[…\.]+$/,
+  ];
 
-  const allTitles = await page.locator('div[tabindex="-1"] span[title]').all();
+  // Use per-row first-span: each chat row has multiple span[title] elements.
+  // The FIRST one is always the chat name; later ones are preview/status text.
+  const rows = await page.locator('div[tabindex="-1"]').all();
   const seen = new Set();
-  const groups = [];
+  const candidates = [];
 
-  for (const el of allTitles) {
-    if (groups.length >= limit) break;
-    const title = await el.getAttribute('title').catch(() => null);
+  for (const row of rows) {
+    if (candidates.length >= limit * 3) break; // collect 3x buffer for access check
+    const nameEl = row.locator('span[title]').first();
+    if (await nameEl.count() === 0) continue;
+    const title = await nameEl.getAttribute('title').catch(() => null);
     if (!title) continue;
     const clean = title.trim();
     if (!clean || clean.length > 100 || seen.has(clean)) continue;
-    if (LOADING_PLACEHOLDERS.has(clean.toLowerCase())) { log(`WA: skipping placeholder: ${clean}`); continue; }
-    if (BLOCKLIST.includes(clean.toLowerCase())) { log(`WA: skipping blocklisted: ${clean}`); continue; }
+    if (SKIP_PATTERNS.some(p => p.test(clean))) { log(`WA: skip status text: ${clean}`); continue; }
+    if (BLOCKLIST.includes(clean.toLowerCase())) { log(`WA: skip blocklisted: ${clean}`); continue; }
     seen.add(clean);
-    groups.push(clean);
+    candidates.push(clean);
   }
 
-  log(`WA: top ${groups.length} groups: ${groups.join(', ')}`);
+  log(`WA: ${candidates.length} candidates — verifying write access...`);
+
+  // Verify each candidate has a message input (i.e. we can actually post to it)
+  const groups = [];
+  for (const name of candidates) {
+    if (groups.length >= limit) break;
+    const escaped = name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const chatEl = page.locator(`span[title="${escaped}"]`).first();
+    if (await chatEl.count() === 0) continue;
+
+    await chatEl.click();
+    await page.waitForTimeout(1200);
+
+    const input = await findInput(page);
+    if (input) {
+      groups.push(name);
+      log(`WA: ✓ writable: ${name}`);
+    } else {
+      log(`WA: ✗ no input (read-only/channel): ${name}`);
+    }
+  }
+
+  log(`WA: top ${groups.length} writable groups: ${groups.join(', ')}`);
   return groups;
 }
 
