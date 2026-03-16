@@ -10,7 +10,6 @@ const db = require('./db');
 const { fetchArticles } = require('./fetch-articles');
 const { isEligible, randomDelay } = require('./policy');
 const { log } = require('./utils/logger');
-const { scanGroups } = require('./wa-group-scanner');
 const { generate: ollamaGenerate } = require('./ollama-client');
 
 const platforms = {
@@ -20,6 +19,7 @@ const platforms = {
   facebookGroups: require('./platforms/facebook'),
   whatsappWeb: require('./platforms/whatsapp'),
 };
+const wa = require('./platforms/whatsapp');
 
 const args = process.argv.slice(2);
 const mode = args.includes('--mode=scheduled') ? 'scheduled' : 'manual';
@@ -71,24 +71,8 @@ function loadSettings() {
   return JSON.parse(fs.readFileSync(p, 'utf8'));
 }
 
-async function runWhatsAppMultiGroup(article, poster, runId, settings, log, isTest = false) {
-  // Step 1: Get top 5 groups by recent activity (WhatsApp sorts by default)
-  let groups;
-  try {
-    groups = await scanGroups({ log, limit: 5 });
-  } catch (e) {
-    log(`whatsappWeb scan failed: ${e.message}`, 'error');
-    db.recordRunPlatform(runId, 'whatsappWeb', 'failed_permanent', article.url, e.message);
-    return;
-  }
-
-  if (groups.length === 0) {
-    log('whatsappWeb: no groups found');
-    db.recordRunPlatform(runId, 'whatsappWeb', 'skipped_by_policy', null, 'no groups');
-    return;
-  }
-
-  // Step 2: Build one message for all groups
+async function runWhatsAppMultiGroup(article, _poster, runId, _settings, log, isTest = false) {
+  // Build the message BEFORE opening the browser (Ollama can take a few seconds)
   let message;
   if (isTest) {
     message = 'Probando...';
@@ -101,41 +85,66 @@ async function runWhatsAppMultiGroup(article, poster, runId, settings, log, isTe
       }
     } catch (e) {
       log(`whatsappWeb ollama failed: ${e.message} — using fallback`);
-      message = article.url ? `${article.title || 'Sin título'}\n\n${article.url}` : (article.title || 'Sin título');
+      message = article.url
+        ? `${article.title || 'Sin título'}\n\n${article.url}`
+        : (article.title || 'Sin título');
     }
   }
 
-  log(`whatsappWeb: posting to ${groups.length} groups`);
-
-  // Step 3: Post to each of the top 5 groups
-  for (let i = 0; i < groups.length; i++) {
-    const group = groups[i];
-    const result = await poster.post(article, { log, groupName: group.name, messageOverride: message });
-
-    if (result.success) {
-      db.recordDelivery(article.url, 'whatsappWeb', 'success', runId);
-      log(`whatsappWeb posted to ${group.name}`);
-    } else {
-      log(`whatsappWeb failed for ${group.name}: ${result.error}`);
-    }
-    db.recordRunPlatform(runId, 'whatsappWeb', result.success ? 'success' : 'failed_permanent', article.url, result.error);
-
-    if (i < groups.length - 1) {
-      const delay = randomBetween(WA_INTER_DELAY_MIN, WA_INTER_DELAY_MAX);
-      log(`whatsappWeb: waiting ${Math.round(delay / 1000)}s before next group`);
-      await new Promise((r) => setTimeout(r, delay));
-    }
+  // Open ONE browser session for the entire WhatsApp run
+  let session;
+  try {
+    session = await wa.openSession({ log });
+  } catch (e) {
+    log(`whatsappWeb: failed to open session: ${e.message}`, 'error');
+    db.recordRunPlatform(runId, 'whatsappWeb', 'failed_permanent', article.url, e.message);
+    return;
   }
 
-  // Step 4: Post to the official channel
-  if (!isTest && WA_CHANNEL_NAME) {
-    log(`whatsappWeb: posting to channel "${WA_CHANNEL_NAME}"...`);
-    const channelResult = await poster.postToChannel(article, { log, channelName: WA_CHANNEL_NAME, messageOverride: message });
-    if (channelResult.success) {
-      log(`whatsappWeb: channel post successful`);
-    } else {
-      log(`whatsappWeb: channel post failed: ${channelResult.error}`);
+  try {
+    // Scan top 5 groups (same browser, already loaded)
+    const groups = await wa.scanGroups(session, 5, log);
+    if (groups.length === 0) {
+      log('whatsappWeb: no groups found');
+      db.recordRunPlatform(runId, 'whatsappWeb', 'skipped_by_policy', null, 'no groups');
+      return;
     }
+
+    log(`whatsappWeb: posting to ${groups.length} groups`);
+
+    // Post to each group in the same session
+    for (let i = 0; i < groups.length; i++) {
+      const name = groups[i];
+      const result = await wa.sendToChat(session, name, message, log);
+
+      if (result.success) {
+        if (article.url) db.recordDelivery(article.url, 'whatsappWeb', 'success', runId);
+      } else {
+        log(`whatsappWeb: failed for ${name}: ${result.error}`);
+      }
+      db.recordRunPlatform(runId, 'whatsappWeb',
+        result.success ? 'success' : 'failed_permanent', article.url, result.error);
+
+      if (i < groups.length - 1) {
+        const delay = randomBetween(WA_INTER_DELAY_MIN, WA_INTER_DELAY_MAX);
+        log(`whatsappWeb: waiting ${Math.round(delay / 1000)}s before next group`);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+
+    // Post to the official channel in the same session
+    if (!isTest && WA_CHANNEL_NAME) {
+      log(`whatsappWeb: posting to channel "${WA_CHANNEL_NAME}"...`);
+      const cr = await wa.sendToChannel(session, WA_CHANNEL_NAME, message, log);
+      if (cr.success) {
+        log('whatsappWeb: channel post successful');
+      } else {
+        log(`whatsappWeb: channel post failed: ${cr.error}`);
+      }
+    }
+  } finally {
+    await session.context.close().catch(() => {});
+    log('whatsappWeb: browser closed.');
   }
 }
 
