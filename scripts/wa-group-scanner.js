@@ -112,51 +112,41 @@ async function scanGroups(options = {}) {
     }
 
     try {
-      const searchBox = page.locator('[data-testid="chat-list-search"], [data-testid="search"]').first();
-      if (await searchBox.count() > 0) {
-        await searchBox.click();
-        await page.waitForTimeout(200);
-        await page.keyboard.type(name, { delay: 20 });
-        await page.waitForTimeout(800);
-      }
-
+      // Click the group row directly (no search needed — Groups filter is active)
       const escaped = name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-      const chatEl = page.locator(`span[title="${escaped}"], span[title="${escaped} "]`).first();
-      if ((await chatEl.count()) === 0) {
-        if (await searchBox.count() > 0) {
-          const first = page.locator('[data-testid="cell-frame-container"]').first();
-          if ((await first.count()) > 0) await first.click();
-        }
-      } else {
-        await chatEl.click();
+      const row = page.locator(`div[tabindex="-1"]:has(span[title="${escaped}"])`).first();
+      if (await row.count() === 0) {
+        log(`Row not found for: ${name}`);
+        continue;
       }
+      await row.click();
+      await page.waitForTimeout(1000);
 
-      await page.waitForTimeout(1200);
-
-      const header = page.locator('header').first();
-      if ((await header.count()) > 0) {
+      // Click the chat header to open group info panel
+      const header = page.locator('header[data-testid="conversation-header"], header').first();
+      if (await header.count() > 0) {
         await header.click();
-        await page.waitForTimeout(800);
+        await page.waitForTimeout(1200);
       }
 
-      const pageText = await page.textContent('body');
-      const match = pageText && pageText.match(/(\d+)\s*participants?/i);
+      // Check body text for member count — matches "participants", "members", "miembros"
+      const pageText = await page.textContent('body').catch(() => '');
+      const match = pageText.match(/(\d[\d,]*)\s*(participants?|members?|miembros?)/i);
       if (match) {
-        const count = parseInt(match[1], 10);
+        const count = parseInt(match[1].replace(/,/g, ''), 10);
         groups.push({ name, memberCount: count });
         log(`Group: ${name} (${count} participants)`);
+      } else {
+        log(`No member count found for: ${name}`);
       }
 
+      // Press Escape to close info panel and go back to list
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(400);
       const backBtn = page.locator('[data-testid="back"], [aria-label="Back"]').first();
-      for (let b = 0; b < 2 && (await backBtn.count()) > 0; b++) {
+      if (await backBtn.count() > 0) {
         await backBtn.click();
-        await page.waitForTimeout(500);
-      }
-
-      const searchBoxCheck = page.locator('[data-testid="chat-list-search"], [data-testid="search"]').first();
-      if ((await searchBoxCheck.count()) > 0) {
-        await page.keyboard.press('Escape');
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(400);
       }
     } catch (e) {
       log(`Error scanning ${name}: ${e.message}`);
