@@ -38,6 +38,15 @@ async function findInput(page) {
   return null;
 }
 
+// Type multi-line text correctly: \n → Shift+Enter (new line), not Enter (send)
+async function typeMessage(page, text) {
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i]) await page.keyboard.type(lines[i], { delay: 20 });
+    if (i < lines.length - 1) await page.keyboard.press('Shift+Enter');
+  }
+}
+
 // ─── Open a single shared browser session ────────────────────────────────────
 async function openSession(opts = {}) {
   const { log = console.log } = opts;
@@ -164,7 +173,7 @@ async function sendToChat(session, chatName, message, log = console.log) {
 
   await input.click();
   await page.waitForTimeout(300);
-  await page.keyboard.type(message, { delay: 30 });
+  await typeMessage(page, message);
   await page.waitForTimeout(previewDelay(message));
   await page.keyboard.press('Enter');
   await page.waitForTimeout(1500);
@@ -216,7 +225,7 @@ async function sendToChannel(session, channelName, message, log = console.log) {
 
   await input.click();
   await page.waitForTimeout(300);
-  await page.keyboard.type(message, { delay: 30 });
+  await typeMessage(page, message);
   await page.waitForTimeout(previewDelay(message));
   await page.keyboard.press('Enter');
   await page.waitForTimeout(1500);
@@ -253,7 +262,7 @@ async function sendToPhone(session, phone, message, log = console.log) {
 
   await input.click();
   await page.waitForTimeout(500);
-  await page.keyboard.type(message, { delay: 30 });
+  await typeMessage(page, message);
   await page.waitForTimeout(previewDelay(message));
   await page.keyboard.press('Enter');
   await page.waitForTimeout(1500);
