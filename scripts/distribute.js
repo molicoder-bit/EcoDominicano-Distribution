@@ -221,9 +221,11 @@ async function run() {
         continue;
       }
 
-      const delay = isTest ? 1000 : randomDelay(config);
-      log(`platform=${platform} eligible, waiting ${delay / 1000}s`);
-      await new Promise((r) => setTimeout(r, delay));
+      const delay = (isTest || mode === 'manual') ? 0 : randomDelay(config);
+      if (delay > 0) {
+        log(`platform=${platform} eligible, waiting ${delay / 1000}s`);
+        await new Promise((r) => setTimeout(r, delay));
+      }
 
       const poster = platforms[platform];
       if (!poster) {
