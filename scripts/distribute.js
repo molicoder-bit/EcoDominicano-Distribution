@@ -28,8 +28,9 @@ const isTest = args.includes('--test');
 
 const LOCK_FILE = path.join(__dirname, '../state/run.lock');
 
-const WA_INTER_DELAY_MIN = parseInt(process.env.WA_INTER_MESSAGE_DELAY_MIN || '300', 10) * 1000;
-const WA_INTER_DELAY_MAX = parseInt(process.env.WA_INTER_MESSAGE_DELAY_MAX || '600', 10) * 1000;
+// Manual runs use short delays (30-60s); scheduled cron runs use long anti-ban delays (300-600s)
+const WA_INTER_DELAY_MIN = parseInt(process.env.WA_INTER_MESSAGE_DELAY_MIN || (mode === 'manual' ? '30' : '300'), 10) * 1000;
+const WA_INTER_DELAY_MAX = parseInt(process.env.WA_INTER_MESSAGE_DELAY_MAX || (mode === 'manual' ? '60' : '600'), 10) * 1000;
 const WA_CHANNEL_NAME = process.env.WA_CHANNEL_NAME || 'EcoDominicano | Noticias RD';
 const WA_TEST_PHONE = process.env.WA_TEST_PHONE || '';
 

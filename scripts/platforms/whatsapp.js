@@ -103,6 +103,11 @@ async function scanGroups(session, limit = 5, log = console.log) {
 
   await page.waitForTimeout(500);
 
+  // Placeholder texts WhatsApp shows while chats are still loading
+  const LOADING_PLACEHOLDERS = new Set([
+    'loading…', 'loading...', 'cargando…', 'cargando...', '…', '...',
+  ]);
+
   const allTitles = await page.locator('div[tabindex="-1"] span[title]').all();
   const seen = new Set();
   const groups = [];
@@ -113,6 +118,7 @@ async function scanGroups(session, limit = 5, log = console.log) {
     if (!title) continue;
     const clean = title.trim();
     if (!clean || clean.length > 100 || seen.has(clean)) continue;
+    if (LOADING_PLACEHOLDERS.has(clean.toLowerCase())) { log(`WA: skipping placeholder: ${clean}`); continue; }
     if (BLOCKLIST.includes(clean.toLowerCase())) { log(`WA: skipping blocklisted: ${clean}`); continue; }
     seen.add(clean);
     groups.push(clean);
