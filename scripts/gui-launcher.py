@@ -165,7 +165,7 @@ def build_whatsapp_tab(parent):
                 test_status.config(text="❌", fg="red")
                 status_var.set("Test failed. Check the log.")
 
-        run_in_background(build_cmd("node scripts/distribute.js --test"), on_line=on_line, on_done=on_done)
+        run_in_background(build_cmd("node scripts/distribute.js --test --platform=whatsappWeb"), on_line=on_line, on_done=on_done)
 
     def do_live():
         if not messagebox.askyesno("Confirm LIVE Run", "Send REAL messages to groups now?"):
@@ -193,7 +193,7 @@ def build_whatsapp_tab(parent):
                 live_status.config(text="❌", fg="red")
                 status_var.set("Distribution failed. Check the log.")
 
-        run_in_background(build_cmd("npm run distribute"), on_line=on_line, on_done=on_done)
+        run_in_background(build_cmd("node scripts/distribute.js --platform=whatsappWeb"), on_line=on_line, on_done=on_done)
 
     # Buttons
     login_btn  = tk.Button(btn_frame, text="1. Login / Scan QR",   command=do_login, width=22, height=2, bg="#e1f5fe")
