@@ -11,6 +11,12 @@ import json
 PROJECT_DIR = "/opt/ecodominicano-distributor"
 PLAYWRIGHT_PATH = "/opt/ms-playwright"
 USER = "ecodist"
+SESSION_PATH = f"{PROJECT_DIR}/state/browser-sessions/whatsapp"
+SINGLETON_LOCK = f"{SESSION_PATH}/SingletonLock"
+
+def browser_is_open():
+    """Return True if a Chrome browser is holding the WhatsApp session open."""
+    return os.path.exists(SINGLETON_LOCK)
 
 def build_cmd(npm_cmd):
     return (
@@ -71,9 +77,28 @@ def build_whatsapp_tab(parent):
 
     def do_login():
         open_terminal("WhatsApp Login", build_cmd("npm run whatsapp:login"))
-        status_var.set("Browser opened for login — scan QR then close window.")
+        status_var.set("Browser opened — scan QR, then CLOSE the browser window before scanning groups.")
+        # Poll until login browser is closed, then re-enable scan button
+        def watch_for_close():
+            import time
+            while browser_is_open():
+                time.sleep(1)
+            # Browser closed — session is saved
+            scan_btn.config(state="normal")
+            status_var.set("Login browser closed. Session saved. You can now scan groups.")
+        threading.Thread(target=watch_for_close, daemon=True).start()
+        scan_btn.config(state="disabled")
+        scan_status.config(text="🔒", fg="gray")
 
     def do_scan():
+        if browser_is_open():
+            messagebox.showwarning(
+                "Browser Still Open",
+                "The login browser is still open.\n\n"
+                "Please close the WhatsApp browser window first,\n"
+                "then click Scan Groups again."
+            )
+            return
         scan_btn.config(state="disabled")
         scan_status.config(text="⏳", fg="orange")
         groups_list.delete(0, tk.END)
