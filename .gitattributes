@@ -1,2 +1,9 @@
+* text=auto
+*.py text eol=lf
+*.js text eol=lf
 *.sh text eol=lf
-*.bash text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.mdc text eol=lf
+*.env text eol=lf
+*.env.example text eol=lf
