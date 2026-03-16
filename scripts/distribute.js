@@ -55,8 +55,18 @@ function acquireLock() {
     fs.writeFileSync(LOCK_FILE, String(process.pid), { flag: 'wx' });
     return true;
   } catch (e) {
-    if (e.code === 'EEXIST') return false;
-    throw e;
+    if (e.code !== 'EEXIST') throw e;
+    // Check if the PID in the lock is still running — if not, it's stale
+    try {
+      const pid = parseInt(fs.readFileSync(LOCK_FILE, 'utf8').trim(), 10);
+      process.kill(pid, 0); // throws if process doesn't exist
+      return false; // process is alive, real lock
+    } catch {
+      // Process is dead — stale lock, clear it and acquire
+      fs.unlinkSync(LOCK_FILE);
+      fs.writeFileSync(LOCK_FILE, String(process.pid));
+      return true;
+    }
   }
 }
 
