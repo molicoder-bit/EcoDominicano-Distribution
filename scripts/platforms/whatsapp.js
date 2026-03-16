@@ -83,7 +83,8 @@ async function openSession(opts = {}) {
       : `chat_list_timeout: WhatsApp did not load in ${LOAD_TIMEOUT / 1000}s`);
   }
 
-  log('WA: chat list ready.');
+  log('WA: chat list ready. Waiting 5s for rows to fully render...');
+  await page.waitForTimeout(5000);
   return { context, page };
 }
 
