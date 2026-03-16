@@ -1,101 +1,228 @@
 #!/usr/bin/env python3
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, scrolledtext
 import subprocess
+import threading
+import re
 import os
-import sys
+import json
 
 # Configuration
 PROJECT_DIR = "/opt/ecodominicano-distributor"
 PLAYWRIGHT_PATH = "/opt/ms-playwright"
 USER = "ecodist"
 
-def run_command(title, cmd):
-    """Run a command in a new gnome-terminal window."""
-    # We use 'bash -c' to run the command and then pause so the user can see the output
-    full_command = (
+def build_cmd(npm_cmd):
+    return (
         f"xhost +local: >/dev/null 2>&1; "
         f"cd {PROJECT_DIR} && "
-        f"sudo -u {USER} DISPLAY=$DISPLAY PLAYWRIGHT_BROWSERS_PATH={PLAYWRIGHT_PATH} {cmd}; "
-        f"echo; read -p 'Done. Press Enter to close...' "
+        f"sudo -u {USER} DISPLAY={os.environ.get('DISPLAY', ':0')} "
+        f"PLAYWRIGHT_BROWSERS_PATH={PLAYWRIGHT_PATH} {npm_cmd}"
     )
-    
-    # Launch gnome-terminal
+
+def open_terminal(title, cmd):
+    """Open a gnome-terminal with a command (for interactive tasks like login)."""
+    full_cmd = f"{cmd}; echo; read -p 'Done. Press Enter to close...'"
     try:
-        subprocess.Popen(
-            ["gnome-terminal", "--title", title, "--", "bash", "-c", full_command]
-        )
-    except FileNotFoundError:
-        messagebox.showerror("Error", "gnome-terminal not found. Please install it.")
+        subprocess.Popen(["gnome-terminal", "--title", title, "--", "bash", "-c", full_cmd])
     except Exception as e:
-        messagebox.showerror("Error", f"Failed to launch terminal:\n{e}")
+        messagebox.showerror("Error", f"Failed to open terminal:\n{e}")
 
-# --- WhatsApp Functions ---
-def wa_login():
-    run_command("WhatsApp Login", "npm run whatsapp:login")
+def run_in_background(cmd, on_line=None, on_done=None):
+    """Run a shell command in a background thread, calling on_line for each line."""
+    env = os.environ.copy()
+    env["PLAYWRIGHT_BROWSERS_PATH"] = PLAYWRIGHT_PATH
 
-def wa_scan():
-    run_command("Scan Groups", "npm run whatsapp:scan")
+    def worker():
+        proc = subprocess.Popen(
+            ["bash", "-c", cmd],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=env
+        )
+        for line in proc.stdout:
+            if on_line:
+                on_line(line.rstrip())
+        proc.wait()
+        if on_done:
+            on_done(proc.returncode)
 
-def wa_test_distribute():
-    run_command("Test Distribution", "node scripts/distribute.js --test")
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
 
-def wa_live_distribute():
-    if messagebox.askyesno("Confirm Live Run", "Are you sure you want to run the LIVE distribution?\nThis will send real messages to groups."):
-        run_command("LIVE Distribution", "npm run distribute")
+# ─────────────────────────────────────────────
+#  WHATSAPP TAB
+# ─────────────────────────────────────────────
+def build_whatsapp_tab(parent):
+    frame = tk.Frame(parent, bg="#f5f5f5")
 
-# --- Placeholder Functions ---
-def not_implemented(platform):
-    messagebox.showinfo("Coming Soon", f"{platform} automation is not yet implemented.")
+    # Status bar at top
+    status_var = tk.StringVar(value="Ready")
+    status_label = tk.Label(frame, textvariable=status_var, font=("Arial", 9, "italic"), bg="#f5f5f5", fg="gray")
+    status_label.pack(anchor="w", padx=15, pady=(10, 0))
 
+    # Button row
+    btn_frame = tk.Frame(frame, bg="#f5f5f5")
+    btn_frame.pack(fill="x", padx=15, pady=8)
+
+    scan_status = tk.Label(btn_frame, text="", font=("Arial", 12), bg="#f5f5f5")
+    distribute_status = tk.Label(btn_frame, text="", font=("Arial", 12), bg="#f5f5f5")
+
+    def do_login():
+        open_terminal("WhatsApp Login", build_cmd("npm run whatsapp:login"))
+        status_var.set("Browser opened for login — scan QR then close window.")
+
+    def do_scan():
+        scan_btn.config(state="disabled")
+        scan_status.config(text="⏳", fg="orange")
+        groups_list.delete(0, tk.END)
+        log_box.config(state="normal")
+        log_box.delete("1.0", tk.END)
+        status_var.set("Scanning groups — browser will open, please wait...")
+
+        found = []
+
+        def on_line(line):
+            # Show raw log
+            log_box.config(state="normal")
+            log_box.insert(tk.END, line + "\n")
+            log_box.see(tk.END)
+            log_box.config(state="disabled")
+
+            # Parse group entries
+            m = re.search(r'Group: (.+?) \((\d+) participants?\)', line)
+            if m:
+                found.append({"name": m.group(1), "count": int(m.group(2))})
+                # Update list sorted largest first
+                groups_list.delete(0, tk.END)
+                for g in sorted(found, key=lambda x: x["count"], reverse=True):
+                    groups_list.insert(tk.END, f"  {g['count']:>5} members  —  {g['name']}")
+
+        def on_done(returncode):
+            scan_btn.config(state="normal")
+            if found:
+                scan_status.config(text="✅", fg="green")
+                status_var.set(f"Scan complete — {len(found)} groups found.")
+                distribute_btn.config(state="normal")
+                test_btn.config(state="normal")
+            else:
+                scan_status.config(text="❌", fg="red")
+                status_var.set("Scan failed or no groups found. Check the log below.")
+
+        run_in_background(build_cmd("npm run whatsapp:scan"), on_line=on_line, on_done=on_done)
+
+    def do_test():
+        distribute_status.config(text="⏳", fg="orange")
+        test_btn.config(state="disabled")
+        distribute_btn.config(state="disabled")
+        status_var.set("Running test distribution...")
+        log_box.config(state="normal")
+        log_box.delete("1.0", tk.END)
+
+        def on_line(line):
+            log_box.config(state="normal")
+            log_box.insert(tk.END, line + "\n")
+            log_box.see(tk.END)
+            log_box.config(state="disabled")
+
+        def on_done(returncode):
+            test_btn.config(state="normal")
+            distribute_btn.config(state="normal")
+            if returncode == 0:
+                distribute_status.config(text="✅", fg="green")
+                status_var.set("Test complete!")
+            else:
+                distribute_status.config(text="❌", fg="red")
+                status_var.set("Test failed. Check the log.")
+
+        run_in_background(build_cmd("node scripts/distribute.js --test"), on_line=on_line, on_done=on_done)
+
+    def do_live():
+        if not messagebox.askyesno("Confirm LIVE Run", "Send REAL messages to groups now?"):
+            return
+        distribute_status.config(text="⏳", fg="orange")
+        test_btn.config(state="disabled")
+        distribute_btn.config(state="disabled")
+        status_var.set("Running LIVE distribution...")
+        log_box.config(state="normal")
+        log_box.delete("1.0", tk.END)
+
+        def on_line(line):
+            log_box.config(state="normal")
+            log_box.insert(tk.END, line + "\n")
+            log_box.see(tk.END)
+            log_box.config(state="disabled")
+
+        def on_done(returncode):
+            test_btn.config(state="normal")
+            distribute_btn.config(state="normal")
+            if returncode == 0:
+                distribute_status.config(text="✅", fg="green")
+                status_var.set("LIVE distribution complete!")
+            else:
+                distribute_status.config(text="❌", fg="red")
+                status_var.set("Distribution failed. Check the log.")
+
+        run_in_background(build_cmd("npm run distribute"), on_line=on_line, on_done=on_done)
+
+    # Buttons
+    login_btn  = tk.Button(btn_frame, text="1. Login / Scan QR",   command=do_login, width=22, height=2, bg="#e1f5fe")
+    scan_btn   = tk.Button(btn_frame, text="2. Scan Groups",        command=do_scan,  width=22, height=2, bg="#e8f5e9")
+    test_btn   = tk.Button(btn_frame, text="3. Test Distribution",  command=do_test,  width=22, height=2, bg="#fff9c4", state="disabled")
+    distribute_btn = tk.Button(btn_frame, text="4. LIVE DISTRIBUTE", command=do_live, width=22, height=2, bg="#ffcdd2", fg="#b71c1c", state="disabled")
+
+    # Layout buttons with status icons
+    for i, (btn, icon_lbl) in enumerate([
+        (login_btn,  tk.Label(btn_frame, text="", bg="#f5f5f5", font=("Arial", 14))),
+        (scan_btn,   scan_status),
+        (test_btn,   distribute_status),
+        (distribute_btn, tk.Label(btn_frame, text="", bg="#f5f5f5")),
+    ]):
+        btn.grid(row=i, column=0, sticky="w", pady=3)
+        icon_lbl.grid(row=i, column=1, padx=8)
+
+    # Groups list
+    tk.Label(frame, text="Groups found:", font=("Arial", 9, "bold"), bg="#f5f5f5").pack(anchor="w", padx=15, pady=(5, 0))
+    groups_list = tk.Listbox(frame, height=6, font=("Courier", 9), bg="white")
+    groups_list.pack(fill="x", padx=15, pady=(2, 5))
+
+    # Log output
+    tk.Label(frame, text="Log:", font=("Arial", 9, "bold"), bg="#f5f5f5").pack(anchor="w", padx=15)
+    log_box = scrolledtext.ScrolledText(frame, height=8, font=("Courier", 8), state="disabled", bg="#1e1e1e", fg="#cccccc")
+    log_box.pack(fill="both", expand=True, padx=15, pady=(2, 10))
+
+    return frame
+
+# ─────────────────────────────────────────────
+#  PLACEHOLDER TABS
+# ─────────────────────────────────────────────
+def build_placeholder_tab(parent, platform):
+    frame = tk.Frame(parent, bg="#f5f5f5")
+    tk.Label(frame, text=f"{platform} automation\nnot yet implemented.",
+             font=("Arial", 12), bg="#f5f5f5", fg="gray").pack(expand=True)
+    return frame
+
+# ─────────────────────────────────────────────
+#  MAIN
+# ─────────────────────────────────────────────
 def main():
     root = tk.Tk()
     root.title("EcoDominicano Distributor")
-    root.geometry("400x450")
-    
-    # Header
-    header = tk.Label(root, text="EcoDominicano\nDistributor Control", font=("Arial", 14, "bold"))
-    header.pack(pady=10)
+    root.geometry("560x600")
+    root.resizable(True, True)
 
-    # Notebook (Tabs)
+    tk.Label(root, text="EcoDominicano Distributor", font=("Arial", 14, "bold")).pack(pady=8)
+
     notebook = ttk.Notebook(root)
-    notebook.pack(expand=True, fill="both", padx=10, pady=5)
+    notebook.pack(expand=True, fill="both", padx=8, pady=4)
 
-    # --- Tab 1: WhatsApp ---
-    tab_wa = tk.Frame(notebook, bg="#f0f0f0")
-    notebook.add(tab_wa, text="WhatsApp")
+    notebook.add(build_whatsapp_tab(notebook),             text="  WhatsApp  ")
+    notebook.add(build_placeholder_tab(notebook, "Telegram"),  text="  Telegram  ")
+    notebook.add(build_placeholder_tab(notebook, "Instagram"), text="  Instagram ")
+    notebook.add(build_placeholder_tab(notebook, "Facebook"),  text="  Facebook  ")
 
-    tk.Label(tab_wa, text="WhatsApp Automation", font=("Arial", 10, "bold"), bg="#f0f0f0").pack(pady=10)
-    
-    tk.Button(tab_wa, text="1. Login / Scan QR", command=wa_login, height=2, bg="#e1f5fe", width=30).pack(pady=5)
-    tk.Button(tab_wa, text="2. Scan Groups", command=wa_scan, height=2, bg="#e8f5e9", width=30).pack(pady=5)
-    tk.Button(tab_wa, text="3. Test Distribution", command=wa_test_distribute, height=2, bg="#fff9c4", width=30).pack(pady=5)
-    tk.Button(tab_wa, text="4. LIVE DISTRIBUTE", command=wa_live_distribute, height=2, bg="#ffcdd2", fg="#b71c1c", width=30).pack(pady=5)
-
-    # --- Tab 2: Telegram ---
-    tab_tg = tk.Frame(notebook, bg="#f0f0f0")
-    notebook.add(tab_tg, text="Telegram")
-    
-    tk.Label(tab_tg, text="Telegram Automation", font=("Arial", 10, "bold"), bg="#f0f0f0").pack(pady=20)
-    tk.Button(tab_tg, text="Login", command=lambda: not_implemented("Telegram"), height=2, width=30).pack(pady=5)
-    tk.Button(tab_tg, text="Distribute", command=lambda: not_implemented("Telegram"), height=2, width=30).pack(pady=5)
-
-    # --- Tab 3: Instagram ---
-    tab_ig = tk.Frame(notebook, bg="#f0f0f0")
-    notebook.add(tab_ig, text="Instagram")
-    
-    tk.Label(tab_ig, text="Instagram Automation", font=("Arial", 10, "bold"), bg="#f0f0f0").pack(pady=20)
-    tk.Button(tab_ig, text="Login", command=lambda: not_implemented("Instagram"), height=2, width=30).pack(pady=5)
-
-    # --- Tab 4: Facebook ---
-    tab_fb = tk.Frame(notebook, bg="#f0f0f0")
-    notebook.add(tab_fb, text="Facebook")
-
-    tk.Label(tab_fb, text="Facebook Automation", font=("Arial", 10, "bold"), bg="#f0f0f0").pack(pady=20)
-    tk.Button(tab_fb, text="Login", command=lambda: not_implemented("Facebook"), height=2, width=30).pack(pady=5)
-
-    # Footer
-    tk.Label(root, text="v1.1 - VM Controller", font=("Arial", 8), fg="gray").pack(side="bottom", pady=5)
+    tk.Label(root, text="v1.2", font=("Arial", 7), fg="gray").pack(side="bottom", pady=2)
 
     root.mainloop()
 
