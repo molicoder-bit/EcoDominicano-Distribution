@@ -73,33 +73,7 @@ function loadSettings() {
 }
 
 async function runWhatsAppMultiGroup(article, _poster, runId, _settings, log, isTest = false) {
-  // TEST MODE: send "Probando..." to the owner's own number only — never to real groups
-  if (isTest) {
-    const testPhone = WA_TEST_PHONE;
-    if (!testPhone) {
-      log('whatsappWeb test: WA_TEST_PHONE not set — skipping');
-      return;
-    }
-    let session;
-    try {
-      session = await wa.openSession({ log });
-      log(`whatsappWeb test: sending "Probando..." to ${testPhone}`);
-      const result = await wa.sendToPhone(session, testPhone, 'Probando...', log);
-      if (result.success) {
-        log(`whatsappWeb test: message delivered to ${testPhone} ✓`);
-      } else {
-        log(`whatsappWeb test: failed — ${result.error}`);
-      }
-    } catch (e) {
-      log(`whatsappWeb test: error — ${e.message}`);
-    } finally {
-      if (session) await session.context.close().catch(() => {});
-      log('whatsappWeb: browser closed.');
-    }
-    return;
-  }
-
-  // LIVE MODE — build the message before opening browser
+  // Build message (same for both test and live — real article, real LLM output)
   let message;
   try {
     const prompt = buildNewsPrompt(article);
@@ -112,6 +86,32 @@ async function runWhatsAppMultiGroup(article, _poster, runId, _settings, log, is
     message = article.url
       ? `${article.title || 'Sin título'}\n\n${article.url}`
       : (article.title || 'Sin título');
+  }
+
+  // TEST MODE: send the real message to the owner's own number only — never to real groups
+  if (isTest) {
+    const testPhone = WA_TEST_PHONE;
+    if (!testPhone) {
+      log('whatsappWeb test: WA_TEST_PHONE not set — skipping');
+      return;
+    }
+    let session;
+    try {
+      session = await wa.openSession({ log });
+      log(`whatsappWeb test: sending to ${testPhone}`);
+      const result = await wa.sendToPhone(session, testPhone, message, log);
+      if (result.success) {
+        log(`whatsappWeb test: delivered to ${testPhone} ✓`);
+      } else {
+        log(`whatsappWeb test: failed — ${result.error}`);
+      }
+    } catch (e) {
+      log(`whatsappWeb test: error — ${e.message}`);
+    } finally {
+      if (session) await session.context.close().catch(() => {});
+      log('whatsappWeb: browser closed.');
+    }
+    return;
   }
 
   // Open ONE browser session for the entire WhatsApp run
@@ -183,13 +183,10 @@ async function run() {
     const runRecord = db.createRun(mode);
     runId = runRecord.id;
 
-    log(`distribute started (mode=${mode}, run_id=${runId}${isTest ? ', test=Probando...' : ''})`);
+    log(`distribute started (mode=${mode}, run_id=${runId}${isTest ? ', TEST' : ''})`);
 
     let article;
-    if (isTest) {
-      article = { title: 'Probando...', url: '' };
-      log('test mode: using static message "Probando..."');
-    } else {
+    {
       let articles;
       try {
         articles = await fetchArticles();
