@@ -38,16 +38,23 @@ function randomBetween(min, max) {
 }
 
 function buildNewsPrompt(article) {
-  return `Rewrite this news in a Dominicanized style (Dominican Spanish, local expressions) for WhatsApp group engagement. Format as:
-- One catchy headline
-- 3 bullet points (key facts)
-- The link at the end
+  return `Eres un dominicano gracioso compartiendo noticias en WhatsApp. Escribe UN solo mensaje corto, sin comillas, sin introducción, sin explicación.
 
-Output ONLY the formatted message, no explanations. Optimize for readability in a group chat.
+FORMATO OBLIGATORIO (copia exacto, solo cambia el contenido entre corchetes):
+*${article.title}*
+[1-2 oraciones cómicas y dominicanizadas contando de qué va la nota — usa expresiones como "diache", "qué vaina", "ta' bueno eso", "se formó el despelote", "mano", "brutísimo", etc.]
+${article.url || ''}
 
-Title: ${article.title}
-Summary: ${article.summary || ''}
-Link: ${article.url || '[LINK]'}`;
+EJEMPLO del tono (NO copies este ejemplo, es solo para que veas el estilo):
+*Apagón deja sin luz a medio Santo Domingo*
+Diache mano, otra vez lo mismo 😂 El CDEEE diciendo que "es temporal" desde el 1965. Ta' to' el país rezando pa' que llegue la luz antes de que se dañe el pollo.
+https://ecodominicano.com/ejemplo
+
+Noticia de hoy:
+Título: ${article.title}
+Resumen: ${article.summary || article.title}
+
+Escribe el mensaje ahora:`;
 }
 
 function acquireLock() {
