@@ -30,19 +30,10 @@ const LOCK_FILE = path.join(__dirname, '../state/run.lock');
 
 const WA_INTER_DELAY_MIN = parseInt(process.env.WA_INTER_MESSAGE_DELAY_MIN || '300', 10) * 1000;
 const WA_INTER_DELAY_MAX = parseInt(process.env.WA_INTER_MESSAGE_DELAY_MAX || '600', 10) * 1000;
-const WA_OFFICIAL_CHANNEL = process.env.WA_OFFICIAL_CHANNEL || '';
+const WA_CHANNEL_NAME = process.env.WA_CHANNEL_NAME || 'EcoDominicano | Noticias RD';
 
 function randomBetween(min, max) {
   return min + Math.floor(Math.random() * (max - min + 1));
-}
-
-function buildCtaPrompt(article) {
-  return `Rewrite this news headline in a Dominicanized style (Dominican Spanish, local expressions, engaging tone). Make it highly persuasive and optimized for follower generation. Include a strong call-to-action inviting readers to join our official WhatsApp channel for more news. Output ONLY the message text, no explanations.
-
-Headline: ${article.title}
-Summary: ${article.summary || ''}
-
-The message should end with something like "Únete a nuestro canal oficial" and include the placeholder [CHANNEL_LINK] where the channel link will be inserted.`;
 }
 
 function buildNewsPrompt(article) {
@@ -81,9 +72,10 @@ function loadSettings() {
 }
 
 async function runWhatsAppMultiGroup(article, poster, runId, settings, log, isTest = false) {
+  // Step 1: Get top 5 groups by recent activity (WhatsApp sorts by default)
   let groups;
   try {
-    groups = await scanGroups({ log });
+    groups = await scanGroups({ log, limit: 5 });
   } catch (e) {
     log(`whatsappWeb scan failed: ${e.message}`, 'error');
     db.recordRunPlatform(runId, 'whatsappWeb', 'failed_permanent', article.url, e.message);
@@ -96,37 +88,28 @@ async function runWhatsAppMultiGroup(article, poster, runId, settings, log, isTe
     return;
   }
 
-  const pickCount = Math.min(5, groups.length);
-  const shuffled = [...groups].sort(() => Math.random() - 0.5);
-  const selected = shuffled.slice(0, pickCount).sort((a, b) => (b.memberCount || 0) - (a.memberCount || 0));
-
-  log(`whatsappWeb: posting to ${selected.length} groups (largest first)`);
-
-  for (let i = 0; i < selected.length; i++) {
-    const group = selected[i];
-    const isLargest = i === 0;
-    let message;
-
-    if (isTest) {
-      message = article.title || 'Probando...';
-    } else try {
-      if (isLargest && WA_OFFICIAL_CHANNEL) {
-        const prompt = buildCtaPrompt(article);
-        message = await ollamaGenerate(prompt);
-        message = message.replace(/\[CHANNEL_LINK\]/g, WA_OFFICIAL_CHANNEL).trim();
-        if (!message) throw new Error('Empty CTA response');
-      } else {
-        const prompt = buildNewsPrompt(article);
-        message = await ollamaGenerate(prompt);
-        if (article.url && !message.includes(article.url)) {
-          message = `${message.trim()}\n\n${article.url}`;
-        }
+  // Step 2: Build one message for all groups
+  let message;
+  if (isTest) {
+    message = 'Probando...';
+  } else {
+    try {
+      const prompt = buildNewsPrompt(article);
+      message = await ollamaGenerate(prompt);
+      if (article.url && !message.includes(article.url)) {
+        message = `${message.trim()}\n\n${article.url}`;
       }
     } catch (e) {
-      log(`whatsappWeb ollama failed for ${group.name}: ${e.message}`);
+      log(`whatsappWeb ollama failed: ${e.message} — using fallback`);
       message = article.url ? `${article.title || 'Sin título'}\n\n${article.url}` : (article.title || 'Sin título');
     }
+  }
 
+  log(`whatsappWeb: posting to ${groups.length} groups`);
+
+  // Step 3: Post to each of the top 5 groups
+  for (let i = 0; i < groups.length; i++) {
+    const group = groups[i];
     const result = await poster.post(article, { log, groupName: group.name, messageOverride: message });
 
     if (result.success) {
@@ -135,13 +118,23 @@ async function runWhatsAppMultiGroup(article, poster, runId, settings, log, isTe
     } else {
       log(`whatsappWeb failed for ${group.name}: ${result.error}`);
     }
-
     db.recordRunPlatform(runId, 'whatsappWeb', result.success ? 'success' : 'failed_permanent', article.url, result.error);
 
-    if (i < selected.length - 1) {
+    if (i < groups.length - 1) {
       const delay = randomBetween(WA_INTER_DELAY_MIN, WA_INTER_DELAY_MAX);
       log(`whatsappWeb: waiting ${Math.round(delay / 1000)}s before next group`);
       await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+
+  // Step 4: Post to the official channel
+  if (!isTest && WA_CHANNEL_NAME) {
+    log(`whatsappWeb: posting to channel "${WA_CHANNEL_NAME}"...`);
+    const channelResult = await poster.postToChannel(article, { log, channelName: WA_CHANNEL_NAME, messageOverride: message });
+    if (channelResult.success) {
+      log(`whatsappWeb: channel post successful`);
+    } else {
+      log(`whatsappWeb: channel post failed: ${channelResult.error}`);
     }
   }
 }

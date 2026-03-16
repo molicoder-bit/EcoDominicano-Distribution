@@ -106,29 +106,32 @@ def build_whatsapp_tab(parent):
         log_box.delete("1.0", tk.END)
         status_var.set("Scanning groups — browser will open, please wait...")
 
-        found = []
+        found_names = []
 
         def on_line(line):
-            # Show raw log
             log_box.config(state="normal")
             log_box.insert(tk.END, line + "\n")
             log_box.see(tk.END)
             log_box.config(state="disabled")
 
-            # Parse group entries
-            m = re.search(r'Group: (.+?) \((\d+) participants?\)', line)
+            if "whatsapp_browser_still_open" in line:
+                status_var.set("Close the WhatsApp browser window, then run Scan Groups again.")
+
+            # Parse: "Found 5 groups: Group A, Group B, Group C"
+            m = re.search(r'Found \d+ groups?: (.+)', line)
             if m:
-                found.append({"name": m.group(1), "count": int(m.group(2))})
-                # Update list sorted largest first
+                names = [n.strip() for n in m.group(1).split(',') if n.strip()]
+                found_names.clear()
+                found_names.extend(names)
                 groups_list.delete(0, tk.END)
-                for g in sorted(found, key=lambda x: x["count"], reverse=True):
-                    groups_list.insert(tk.END, f"  {g['count']:>5} members  —  {g['name']}")
+                for i, name in enumerate(found_names, 1):
+                    groups_list.insert(tk.END, f"  {i}. {name}")
 
         def on_done(returncode):
             scan_btn.config(state="normal")
-            if found:
+            if found_names:
                 scan_status.config(text="✅", fg="green")
-                status_var.set(f"Scan complete — {len(found)} groups found.")
+                status_var.set(f"Scan complete — {len(found_names)} groups ready.")
                 distribute_btn.config(state="normal")
                 test_btn.config(state="normal")
             else:
@@ -207,9 +210,9 @@ def build_whatsapp_tab(parent):
         btn.grid(row=i, column=0, sticky="w", pady=3)
         icon_lbl.grid(row=i, column=1, padx=8)
 
-    # Groups list
-    tk.Label(frame, text="Groups found:", font=("Arial", 9, "bold"), bg="#f5f5f5").pack(anchor="w", padx=15, pady=(5, 0))
-    groups_list = tk.Listbox(frame, height=6, font=("Courier", 9), bg="white")
+    # Groups list (top 5 by recent activity)
+    tk.Label(frame, text="Top 5 groups (most recent activity):", font=("Arial", 9, "bold"), bg="#f5f5f5").pack(anchor="w", padx=15, pady=(5, 0))
+    groups_list = tk.Listbox(frame, height=5, font=("Courier", 9), bg="white")
     groups_list.pack(fill="x", padx=15, pady=(2, 5))
 
     # Log output

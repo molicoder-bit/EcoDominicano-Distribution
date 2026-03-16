@@ -90,10 +90,10 @@ async function main() {
 
   if (loggedIn) {
     log('AUTH', 'Logged in successfully. Waiting for chats to sync...');
-    // Wait until chat rows appear — that means WhatsApp has synced enough to be usable
-    await page.waitForSelector('[data-testid="cell-frame-container"]', { timeout: 120000 })
-      .catch(() => log('AUTH', 'Chat rows did not appear in 2 min — may still be syncing.'));
-    const chatCount = await page.locator('[data-testid="cell-frame-container"]').count();
+    // WhatsApp UI changed; title spans in the sidebar are the most stable signal now.
+    await page.waitForSelector('div[tabindex="-1"] span[title]', { timeout: 120000 })
+      .catch(() => log('AUTH', 'Chat rows did not appear in 2 min - may still be syncing.'));
+    const chatCount = await page.locator('div[tabindex="-1"] span[title]').count().catch(() => 0);
     log('AUTH', `Chats visible in sidebar: ${chatCount}. You can now close this window.`);
     log('AUTH', 'Keep the window open longer if you want more chats to sync before scanning.');
   } else {

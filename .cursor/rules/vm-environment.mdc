@@ -1,0 +1,36 @@
+---
+description: VM environment facts for EcoDominicano distributor
+alwaysApply: true
+---
+
+# Ubuntu VM Environment
+
+## VM Access
+- SSH: `ssh ubuntu-vm` → resolves to `127.0.0.1:2222` via NAT port forward
+- SSH user: `lmolina` (has sudo)
+- App user: `ecodist` (runs the distributor)
+- Project root on VM: `/opt/ecodominicano-distributor/`
+
+## Desktop Environment
+**The VM HAS a desktop environment already installed.**
+- Do NOT install XFCE, GNOME, or any desktop — it's already there.
+- The user accesses the desktop through VirtualBox's console window.
+- Running scripts with `headless: false` will show the browser window on the VM's desktop.
+- When debugging, the user can open the VirtualBox window and see what's happening.
+
+## Playwright / Browser
+- Playwright browsers: `/opt/ms-playwright/`
+- Always set `PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright` when running scripts.
+- Scripts detect `DISPLAY` env var to decide `headless: true/false`.
+- For manual/visible runs: ensure `DISPLAY` is set (e.g., `:0` on the desktop session).
+- For automated/cron runs: use `xvfb-run -a` for a virtual display.
+
+## Networking (NAT)
+- VM uses NAT adapter — download speed ~7 MB/s (much better than bridged).
+- Host (Windows) is reachable from VM at `10.0.2.2`.
+- Ollama API: `http://10.0.2.2:11434` (host must have `OLLAMA_HOST=0.0.0.0`).
+
+## Common pitfalls
+- Always remove `Singleton*` files from the WhatsApp session dir before launching Chrome.
+- Never run two Chrome instances pointing at the same session directory simultaneously.
+- Logs at: `/opt/ecodominicano-distributor/logs/`

@@ -26,9 +26,9 @@ async function post(article, opts = {}) {
     if (!fs.existsSync(path.dirname(SESSION_PATH))) {
       fs.mkdirSync(path.dirname(SESSION_PATH), { recursive: true });
     }
-    for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
-      const p = path.join(SESSION_PATH, f);
-      if (fs.existsSync(p)) fs.unlinkSync(p);
+    const singletonLock = path.join(SESSION_PATH, 'SingletonLock');
+    if (fs.existsSync(singletonLock)) {
+      return { success: false, error: 'whatsapp_browser_still_open', detail: 'Close WhatsApp browser window before posting' };
     }
     const context = await chromium.launchPersistentContext(SESSION_PATH, {
       headless: !process.env.DISPLAY,
@@ -135,4 +135,83 @@ async function post(article, opts = {}) {
   }
 }
 
-module.exports = { post };
+/**
+ * Post to a WhatsApp Channel (accessed via the Channels tab in the left sidebar).
+ * channelName should match exactly, e.g. "EcoDominicano | Noticias RD"
+ */
+async function postToChannel(article, opts = {}) {
+  const { log: logger, channelName, messageOverride } = opts;
+  if (!channelName) return { success: false, error: 'channelName required' };
+
+  try {
+    const { chromium } = require('playwright');
+    const fs = require('fs');
+    const singletonLock = path.join(SESSION_PATH, 'SingletonLock');
+    if (fs.existsSync(singletonLock)) {
+      return { success: false, error: 'whatsapp_browser_still_open' };
+    }
+
+    const context = await chromium.launchPersistentContext(SESSION_PATH, {
+      headless: !process.env.DISPLAY,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      viewport: { width: 1280, height: 720 },
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      locale: 'en-US',
+    });
+
+    const page = context.pages()[0] || await context.newPage();
+    await page.goto('https://web.whatsapp.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.locator('#pane-side').waitFor({ state: 'visible', timeout: 120000 });
+
+    // Click the Channels button in the left navigation
+    const channelsBtn = page.locator('[data-testid="channels"], [aria-label="Channels"], [title="Channels"]').first();
+    if (await channelsBtn.count() > 0) {
+      await channelsBtn.click();
+      await page.waitForTimeout(1000);
+    }
+
+    // Find the channel by name
+    const escapedName = channelName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const channelEl = page.locator(`span[title="${escapedName}"], span[title="${escapedName} "]`).first();
+
+    if (await channelEl.count() === 0) {
+      await context.close();
+      return { success: false, error: 'channel_not_found', detail: `Channel "${channelName}" not found` };
+    }
+
+    await channelEl.click();
+    await page.waitForTimeout(1500);
+
+    const text = messageOverride ?? (article.url ? `${article.title || ''}\n\n${article.url}` : (article.title || ''));
+
+    // Find the message input
+    const inputSelectors = [
+      '[data-testid="conversation-compose-box-input"]',
+      'footer [contenteditable="true"]',
+      'div[contenteditable="true"][data-lexical-editor="true"]',
+    ];
+    let input = null;
+    for (const sel of inputSelectors) {
+      const el = page.locator(sel).first();
+      if (await el.count() > 0) { input = el; break; }
+    }
+
+    if (!input) {
+      await context.close();
+      return { success: false, error: 'channel_input_not_found' };
+    }
+
+    await input.click();
+    await page.waitForTimeout(300);
+    await page.keyboard.type(text, { delay: 30 });
+    await page.waitForTimeout(1500);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(2000);
+    await context.close();
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+module.exports = { post, postToChannel };
