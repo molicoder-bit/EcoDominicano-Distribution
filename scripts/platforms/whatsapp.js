@@ -26,8 +26,12 @@ async function post(article, opts = {}) {
     if (!fs.existsSync(path.dirname(SESSION_PATH))) {
       fs.mkdirSync(path.dirname(SESSION_PATH), { recursive: true });
     }
+    for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+      const p = path.join(SESSION_PATH, f);
+      if (fs.existsSync(p)) fs.unlinkSync(p);
+    }
     const context = await chromium.launchPersistentContext(SESSION_PATH, {
-      headless: true,
+      headless: !process.env.DISPLAY,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
       viewport: { width: 1280, height: 720 },
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -35,17 +39,15 @@ async function post(article, opts = {}) {
     });
     const page = context.pages()[0] || await context.newPage();
     await page.goto('https://web.whatsapp.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForTimeout(15000); // wait for "Loading your chats" to finish
 
-    const loggedIn = await page.locator('[data-testid="default-user"]').count() > 0
-      || await page.locator('#pane-side').count() > 0
-      || await page.locator('[data-testid="chat-list"]').count() > 0;
-    if (!loggedIn) {
+    const loadTimeout = parseInt(process.env.WA_CHAT_LOAD_TIMEOUT || '600', 10) * 1000;
+    try {
+      await page.locator('#pane-side').waitFor({ state: 'visible', timeout: loadTimeout });
+      await page.locator('div[tabindex="-1"] span[title]').first().waitFor({ state: 'visible', timeout: loadTimeout });
+    } catch {
       const qr = await page.locator('canvas').count();
-      if (qr > 0) {
-        await context.close();
-        return { success: false, error: 'not_logged_in', detail: 'Run npm run whatsapp:login to scan QR' };
-      }
+      await context.close();
+      return { success: false, error: qr > 0 ? 'not_logged_in' : 'chat_list_timeout', detail: qr > 0 ? 'Run npm run whatsapp:login to scan QR' : 'Chat list did not load in time' };
     }
 
     await page.waitForTimeout(5000);

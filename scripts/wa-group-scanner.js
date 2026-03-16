@@ -44,24 +44,21 @@ async function scanGroups(options = {}) {
   log('Browser launched. Navigating to WhatsApp Web...');
   const page = context.pages()[0] || await context.newPage();
   await page.goto('https://web.whatsapp.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
-  log('Page loaded. Waiting for chat list to appear...');
+  log('Page loaded. Waiting for chat list...');
 
-  const chatListSelector = '#pane-side, [data-testid="chat-list"]';
-  const chatRowSelector = '[data-testid="cell-frame-container"]';
-  const chatList = page.locator(chatListSelector).first();
   const loadTimeout = parseInt(process.env.WA_CHAT_LOAD_TIMEOUT || '600', 10) * 1000;
 
   // Log progress every 10s while waiting
   const progressInterval = setInterval(async () => {
     const qr = await page.locator('canvas').count().catch(() => 0);
-    const rows = await page.locator(chatRowSelector).count().catch(() => 0);
-    if (qr > 0) log('QR code visible — session may have expired. Run Login first.');
+    const rows = await page.locator('div[tabindex="-1"] span[title]').count().catch(() => 0);
+    if (qr > 0) log('QR code visible — session expired. Run Login first.');
     else log(`Still loading... (${rows} chats visible so far)`);
   }, 10000);
 
   try {
-    await chatList.waitFor({ state: 'visible', timeout: loadTimeout });
-    await page.locator(chatRowSelector).first().waitFor({ state: 'visible', timeout: loadTimeout });
+    await page.locator('#pane-side').waitFor({ state: 'visible', timeout: loadTimeout });
+    await page.locator('div[tabindex="-1"] span[title]').first().waitFor({ state: 'visible', timeout: loadTimeout });
   } catch {
     clearInterval(progressInterval);
     const qr = await page.locator('canvas').count();
@@ -69,18 +66,27 @@ async function scanGroups(options = {}) {
     throw new Error(qr > 0 ? 'Session expired. Run Login to scan QR.' : `Chat list did not load in ${loadTimeout / 1000}s.`);
   }
   clearInterval(progressInterval);
-  log('Chat list loaded. Reading chats...');
+  log('Chat list loaded.');
 
-  await page.waitForTimeout(2000);
+  // Try clicking "Groups" filter to only show groups — saves scanning time
+  const groupsFilter = page.locator('button:has-text("Groups"), [data-testid="chat-list-filter-tab-groups"]').first();
+  if (await groupsFilter.count() > 0) {
+    log('Found "Groups" filter — clicking it to show only groups...');
+    await groupsFilter.click();
+    await page.waitForTimeout(1000);
+  } else {
+    log('No "Groups" filter found — will scan all chats.');
+  }
 
-  const chatRows = await page.locator('[data-testid="cell-frame-container"]').all();
+  await page.waitForTimeout(1500);
+
+  // Read all visible chat titles
+  const titleElements = await page.locator('div[tabindex="-1"] span[title]').all();
   const seen = new Set();
   const chatNames = [];
 
-  for (const row of chatRows) {
-    const titleSpan = row.locator('span[title]').first();
-    if ((await titleSpan.count()) === 0) continue;
-    const title = await titleSpan.getAttribute('title');
+  for (const el of titleElements) {
+    const title = await el.getAttribute('title').catch(() => null);
     if (!title || title.length > 100) continue;
     const clean = title.trim();
     if (!clean || seen.has(clean)) continue;
