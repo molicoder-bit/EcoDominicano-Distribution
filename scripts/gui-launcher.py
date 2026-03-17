@@ -60,13 +60,51 @@ def run_in_background(cmd, on_line=None, on_done=None):
 # ─────────────────────────────────────────────
 #  WHATSAPP TAB
 # ─────────────────────────────────────────────
+def get_platform_status():
+    """Call platform-status.js and return parsed JSON, or {} on error."""
+    try:
+        cmd = build_cmd("node scripts/platform-status.js")
+        result = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True, timeout=15)
+        return json.loads(result.stdout)
+    except Exception:
+        return {}
+
 def build_whatsapp_tab(parent):
     frame = tk.Frame(parent, bg="#f5f5f5")
 
-    # Status bar at top
+    # ── Daily status bar ──────────────────────────────────────────────────
+    status_frame = tk.Frame(frame, bg="#f5f5f5")
+    status_frame.pack(fill="x", padx=15, pady=(8, 0))
+
+    indicator_label = tk.Label(status_frame, text="⬤", font=("Arial", 14), bg="#f5f5f5", fg="gray")
+    indicator_label.pack(side="left")
+    daily_status_var = tk.StringVar(value="Loading status...")
+    tk.Label(status_frame, textvariable=daily_status_var, font=("Arial", 9), bg="#f5f5f5", fg="#444").pack(side="left", padx=6)
+    refresh_btn = tk.Button(status_frame, text="↻", font=("Arial", 10), bg="#f5f5f5", relief="flat",
+                            command=lambda: refresh_status())
+    refresh_btn.pack(side="right")
+
+    def refresh_status():
+        daily_status_var.set("Checking...")
+        indicator_label.config(fg="gray")
+        def worker():
+            data = get_platform_status()
+            wa = data.get("whatsappWeb", {})
+            color = {"green": "#2e7d32", "yellow": "#f57f17", "red": "#c62828"}.get(wa.get("status"), "gray")
+            text = wa.get("reason", "Status unavailable")
+            sent = wa.get("groupsSentToday", [])
+            indicator_label.config(fg=color)
+            daily_status_var.set(text)
+            if sent:
+                sent_list.delete(0, tk.END)
+                for g in sent:
+                    sent_list.insert(tk.END, f"  ✓ {g}")
+        threading.Thread(target=worker, daemon=True).start()
+
+    # Status bar at bottom
     status_var = tk.StringVar(value="Ready")
     status_label = tk.Label(frame, textvariable=status_var, font=("Arial", 9, "italic"), bg="#f5f5f5", fg="gray")
-    status_label.pack(anchor="w", padx=15, pady=(10, 0))
+    status_label.pack(anchor="w", padx=15, pady=(2, 0))
 
     # Button row
     btn_frame = tk.Frame(frame, bg="#f5f5f5")
@@ -192,6 +230,7 @@ def build_whatsapp_tab(parent):
             else:
                 live_status.config(text="❌", fg="red")
                 status_var.set("Distribution failed. Check the log.")
+            refresh_status()
 
         run_in_background(build_cmd("node scripts/distribute.js --platform=whatsappWeb"), on_line=on_line, on_done=on_done)
 
@@ -213,13 +252,24 @@ def build_whatsapp_tab(parent):
 
     # Groups list (top 5 by recent activity)
     tk.Label(frame, text="Top 5 groups (most recent activity):", font=("Arial", 9, "bold"), bg="#f5f5f5").pack(anchor="w", padx=15, pady=(5, 0))
-    groups_list = tk.Listbox(frame, height=5, font=("Courier", 9), bg="white")
-    groups_list.pack(fill="x", padx=15, pady=(2, 5))
+    groups_list = tk.Listbox(frame, height=4, font=("Courier", 9), bg="white")
+    groups_list.pack(fill="x", padx=15, pady=(2, 2))
+
+    # Already sent today
+    tk.Label(frame, text="Already sent today:", font=("Arial", 9, "bold"), bg="#f5f5f5").pack(anchor="w", padx=15)
+    sent_list = tk.Listbox(frame, height=3, font=("Courier", 9), bg="#f9fbe7")
+    sent_list.pack(fill="x", padx=15, pady=(2, 5))
 
     # Log output
     tk.Label(frame, text="Log:", font=("Arial", 9, "bold"), bg="#f5f5f5").pack(anchor="w", padx=15)
     log_box = scrolledtext.ScrolledText(frame, height=8, font=("Courier", 8), state="disabled", bg="#1e1e1e", fg="#cccccc")
     log_box.pack(fill="both", expand=True, padx=15, pady=(2, 10))
+
+    # Refresh status on load and after distribute completes
+    frame.after(500, refresh_status)
+
+    # Patch on_done for live/test to also refresh status
+    _orig_live_on_done = None  # placeholder; refresh_status already callable in scope
 
     return frame
 

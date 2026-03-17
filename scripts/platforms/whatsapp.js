@@ -136,10 +136,24 @@ async function scanGroups(session, limit = 5, log = console.log) {
 
   log(`WA: ${candidates.length} candidates — verifying write access...`);
 
+  // Load today's already-sent groups to skip them
+  let sentToday = new Set();
+  try {
+    const db = require('../db');
+    sentToday = new Set(db.getGroupsSentToday('whatsappWeb'));
+    if (sentToday.size > 0) log(`WA: already sent today: ${[...sentToday].join(', ')}`);
+  } catch { /* db optional in standalone scan */ }
+
   // Verify each candidate has a message input (i.e. we can actually post to it)
   const groups = [];
   for (const name of candidates) {
     if (groups.length >= limit) break;
+
+    if (sentToday.has(name)) {
+      log(`WA: ✗ skip ${name} — already sent today`);
+      continue;
+    }
+
     const escaped = name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const chatEl = page.locator(`span[title="${escaped}"]`).first();
     if (await chatEl.count() === 0) continue;

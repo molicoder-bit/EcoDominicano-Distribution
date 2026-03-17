@@ -63,6 +63,18 @@ function initSchema(d) {
     CREATE INDEX IF NOT EXISTS idx_deliveries_platform ON deliveries(platform);
     CREATE INDEX IF NOT EXISTS idx_deliveries_posted ON deliveries(posted_at);
     CREATE INDEX IF NOT EXISTS idx_deliveries_article_platform ON deliveries(article_url, platform);
+
+    CREATE TABLE IF NOT EXISTS group_deliveries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      platform TEXT NOT NULL,
+      group_name TEXT NOT NULL,
+      article_url TEXT,
+      sent_at TEXT NOT NULL,
+      run_id INTEGER,
+      FOREIGN KEY (run_id) REFERENCES runs(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_gd_platform_date ON group_deliveries(platform, sent_at);
+    CREATE INDEX IF NOT EXISTS idx_gd_group ON group_deliveries(platform, group_name, sent_at);
   `);
 }
 
@@ -132,6 +144,67 @@ function setCooldown(platform, untilIso, reason) {
   ).run(platform, untilIso, reason);
 }
 
+// ─── Group delivery tracking ───────────────────────────────────────────────────
+
+function recordGroupDelivery(platform, groupName, articleUrl, runId) {
+  getDb().prepare(
+    'INSERT INTO group_deliveries (platform, group_name, article_url, sent_at, run_id) VALUES (?, ?, ?, ?, ?)'
+  ).run(platform, groupName, articleUrl || null, new Date().toISOString(), runId || null);
+}
+
+/** Returns all group names sent to on this platform today (local date). */
+function getGroupsSentToday(platform) {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const rows = getDb().prepare(
+    'SELECT DISTINCT group_name FROM group_deliveries WHERE platform = ? AND sent_at >= ?'
+  ).all(platform, todayStart.toISOString());
+  return rows.map(r => r.group_name);
+}
+
+/** Returns total individual group sends today for a platform. */
+function getGroupSendCountToday(platform) {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const row = getDb().prepare(
+    'SELECT COUNT(*) as c FROM group_deliveries WHERE platform = ? AND sent_at >= ?'
+  ).get(platform, todayStart.toISOString());
+  return row ? row.c : 0;
+}
+
+/** True if this specific group already received a message today. */
+function wasGroupSentToday(platform, groupName) {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const row = getDb().prepare(
+    'SELECT 1 FROM group_deliveries WHERE platform = ? AND group_name = ? AND sent_at >= ? LIMIT 1'
+  ).get(platform, groupName, todayStart.toISOString());
+  return !!row;
+}
+
+// ─── Platform daily status (for GUI indicators) ────────────────────────────────
+
+/**
+ * Returns { count, limit, status, reason } for a platform.
+ * status: 'green' | 'yellow' | 'red'
+ */
+function getPlatformDailyStatus(platform, limits) {
+  const count = getGroupSendCountToday(platform);
+  const { dailyLimit = 25, yellowAt = 20 } = limits || {};
+  let status, reason;
+  if (count >= dailyLimit) {
+    status = 'red';
+    reason = `Daily cap of ${dailyLimit} reached — no more sends today`;
+  } else if (count >= yellowAt) {
+    status = 'yellow';
+    reason = `${count}/${dailyLimit} sent today — approaching daily limit`;
+  } else {
+    status = 'green';
+    reason = `${count}/${dailyLimit} sent today — OK`;
+  }
+  return { count, limit: dailyLimit, status, reason };
+}
+
 function close() {
   if (db) {
     db.close();
@@ -151,5 +224,10 @@ module.exports = {
   hasDelivered,
   getCooldown,
   setCooldown,
+  recordGroupDelivery,
+  getGroupsSentToday,
+  getGroupSendCountToday,
+  wasGroupSentToday,
+  getPlatformDailyStatus,
   close,
 };

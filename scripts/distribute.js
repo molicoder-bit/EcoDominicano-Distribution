@@ -33,6 +33,8 @@ const WA_INTER_DELAY_MIN = parseInt(process.env.WA_INTER_MESSAGE_DELAY_MIN || (m
 const WA_INTER_DELAY_MAX = parseInt(process.env.WA_INTER_MESSAGE_DELAY_MAX || (mode === 'manual' ? '60' : '600'), 10) * 1000;
 const WA_CHANNEL_NAME = process.env.WA_CHANNEL_NAME || 'EcoDominicano | Noticias RD';
 const WA_TEST_PHONE = process.env.WA_TEST_PHONE || '';
+const WA_DAILY_LIMIT = parseInt(process.env.WA_DAILY_LIMIT || '25', 10);
+const WA_DAILY_YELLOW = parseInt(process.env.WA_DAILY_YELLOW || '20', 10);
 
 function randomBetween(min, max) {
   return min + Math.floor(Math.random() * (max - min + 1));
@@ -132,7 +134,16 @@ async function runWhatsAppMultiGroup(article, _poster, runId, _settings, log, is
     return;
   }
 
-  // Open ONE browser session for the entire WhatsApp run
+    // Check daily cap before opening the browser
+    const dailyStatus = db.getPlatformDailyStatus('whatsappWeb', { dailyLimit: WA_DAILY_LIMIT, yellowAt: WA_DAILY_YELLOW });
+    log(`whatsappWeb: daily status — ${dailyStatus.reason}`);
+    if (dailyStatus.status === 'red') {
+      log('whatsappWeb: daily cap reached — skipping');
+      db.recordRunPlatform(runId, 'whatsappWeb', 'skipped_by_policy', article.url, dailyStatus.reason);
+      return;
+    }
+
+    // Open ONE browser session for the entire WhatsApp run
   let session;
   try {
     session = await wa.openSession({ log });
@@ -154,12 +165,29 @@ async function runWhatsAppMultiGroup(article, _poster, runId, _settings, log, is
     log(`whatsappWeb: posting to ${groups.length} groups`);
 
     // Post to each group in the same session
+    let sentCount = 0;
     for (let i = 0; i < groups.length; i++) {
       const name = groups[i];
+
+      // Double-check: never send to same group twice today
+      if (db.wasGroupSentToday('whatsappWeb', name)) {
+        log(`whatsappWeb: skip ${name} — already sent today`);
+        continue;
+      }
+
+      // Hard stop if daily cap hit mid-run
+      const currentCount = db.getGroupSendCountToday('whatsappWeb');
+      if (currentCount >= WA_DAILY_LIMIT) {
+        log(`whatsappWeb: daily cap of ${WA_DAILY_LIMIT} reached mid-run — stopping`);
+        break;
+      }
+
       const result = await wa.sendToChat(session, name, message, log);
 
       if (result.success) {
+        db.recordGroupDelivery('whatsappWeb', name, article.url, runId);
         if (article.url) db.recordDelivery(article.url, 'whatsappWeb', 'success', runId);
+        sentCount++;
       } else {
         log(`whatsappWeb: failed for ${name}: ${result.error}`);
       }
@@ -172,6 +200,7 @@ async function runWhatsAppMultiGroup(article, _poster, runId, _settings, log, is
         await new Promise((r) => setTimeout(r, delay));
       }
     }
+    log(`whatsappWeb: sent to ${sentCount} groups today (total today: ${db.getGroupSendCountToday('whatsappWeb')}/${WA_DAILY_LIMIT})`);
 
     // Post to the official channel in the same session
     if (!isTest && WA_CHANNEL_NAME) {
