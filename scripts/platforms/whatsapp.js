@@ -112,6 +112,9 @@ async function scanGroups(session, limit = 20, log = console.log) {
     /está escribiendo/i,   // Spanish typing
     /está escrevendo/i,    // Portuguese typing
     /^[…\.\s]+$/,          // Only dots/ellipsis
+    // Phone number patterns — DMs with contacts, not groups
+    /^\+?[\d\s\(\)\-\.]{7,}$/,  // e.g. "+1 (347) 615-0920", "3476150920"
+    /^\+\d[\d\s\(\)\-\.]{6,}$/, // e.g. "+1 347 615 0920"
   ];
 
   // Use per-row first-span: each chat row has multiple span[title] elements.
