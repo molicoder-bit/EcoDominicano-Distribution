@@ -89,7 +89,7 @@ async function openSession(opts = {}) {
 }
 
 // ─── Scan top N groups from the open session ──────────────────────────────────
-async function scanGroups(session, limit = 5, log = console.log) {
+async function scanGroups(session, limit = 20, log = console.log) {
   const { page } = session;
 
   // Apply Groups filter for cleaner list

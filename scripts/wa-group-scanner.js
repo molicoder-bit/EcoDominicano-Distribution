@@ -11,7 +11,7 @@ async function main() {
   let session;
   try {
     session = await openSession({ log: console.log });
-    const groups = await scanGroups(session, 5, console.log);
+    const groups = await scanGroups(session, 20, console.log);
     console.log(`\nFound ${groups.length} groups: ${groups.join(', ')}`);
   } catch (e) {
     console.error(e.message);

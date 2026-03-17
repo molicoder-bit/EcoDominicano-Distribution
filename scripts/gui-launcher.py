@@ -252,7 +252,7 @@ def build_whatsapp_tab(parent):
 
     # Groups list (top 5 by recent activity)
     tk.Label(frame, text="Top 5 groups (most recent activity):", font=("Arial", 9, "bold"), bg="#f5f5f5").pack(anchor="w", padx=15, pady=(5, 0))
-    groups_list = tk.Listbox(frame, height=4, font=("Courier", 9), bg="white")
+    groups_list = tk.Listbox(frame, height=8, font=("Courier", 9), bg="white")
     groups_list.pack(fill="x", padx=15, pady=(2, 2))
 
     # Already sent today

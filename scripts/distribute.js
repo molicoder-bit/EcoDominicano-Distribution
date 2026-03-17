@@ -154,8 +154,8 @@ async function runWhatsAppMultiGroup(article, _poster, runId, _settings, log, is
   }
 
   try {
-    // Scan top 5 groups (same browser, already loaded)
-    const groups = await wa.scanGroups(session, 5, log);
+    // Scan top 20 groups (same browser, already loaded)
+    const groups = await wa.scanGroups(session, 20, log);
     if (groups.length === 0) {
       log('whatsappWeb: no groups found');
       db.recordRunPlatform(runId, 'whatsappWeb', 'skipped_by_policy', null, 'no groups');
