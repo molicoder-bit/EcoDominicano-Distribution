@@ -272,7 +272,7 @@ async function runTelegramMultiChat(article, runId, log, isTest) {
       return;
     }
     log(`telegram test: sending to personal chat ${TG_TEST_CHAT}`);
-    const r = await tg.postToChannel(TG_TEST_CHAT, message, log);
+    const r = await tg.postToChannel(TG_TEST_CHAT, message, log, { articleUrl: article.url });
     log(r.success ? 'telegram test: delivered ✓' : `telegram test: failed — ${r.error}`);
     return;
   }
@@ -286,60 +286,46 @@ async function runTelegramMultiChat(article, runId, log, isTest) {
     return;
   }
 
-  // Post to groups via GramJS
-  let client;
-  try {
-    client = await tg.openSession(log);
-  } catch (e) {
-    log(`telegram: failed to open session: ${e.message}`);
-    db.recordRunPlatform(runId, 'telegram', 'failed_permanent', article.url, e.message);
+  // Post to all configured Bot API targets (channel + groups)
+  const targets = tg.getBotTargets();
+  if (targets.length === 0) {
+    log('telegram: no targets configured (set TELEGRAM_CHANNEL_ID / TELEGRAM_GROUP_IDS)');
+    db.recordRunPlatform(runId, 'telegram', 'skipped_by_policy', null, 'no targets');
     return;
   }
 
-  try {
-    const groups = await tg.scanGroups(client, 20, log);
-    let sentCount = 0;
+  log(`telegram: posting to ${targets.length} targets`);
+  let sentCount = 0;
 
-    for (let i = 0; i < groups.length; i++) {
-      const group = groups[i];
+  for (let i = 0; i < targets.length; i++) {
+    const target = targets[i];
 
-      if (db.wasGroupSentToday('telegram', group.name)) {
-        log(`telegram: skip "${group.name}" — already sent today`);
-        continue;
-      }
-      if (db.getGroupSendCountToday('telegram') >= TG_DAILY_LIMIT) {
-        log(`telegram: daily cap reached mid-run — stopping`);
-        break;
-      }
-
-      const result = await tg.sendToGroup(client, group, message, log);
-      if (result.success) {
-        db.recordGroupDelivery('telegram', group.name, article.url, runId);
-        if (article.url) db.recordDelivery(article.url, 'telegram', 'success', runId);
-        sentCount++;
-      } else {
-        log(`telegram: failed for "${group.name}": ${result.error}`);
-      }
-      db.recordRunPlatform(runId, 'telegram',
-        result.success ? 'success' : 'failed_permanent', article.url, result.error);
-
-      if (i < groups.length - 1) {
-        const delay = randomBetween(TG_INTER_MIN, TG_INTER_MAX);
-        await new Promise(r => setTimeout(r, delay));
-      }
+    if (db.wasGroupSentToday('telegram', target.name)) {
+      log(`telegram: skip "${target.name}" — already sent today`);
+      continue;
     }
-    log(`telegram: sent to ${sentCount} groups (total today: ${db.getGroupSendCountToday('telegram')}/${TG_DAILY_LIMIT})`);
-
-    // Post to official channel via Bot API
-    if (TG_CHANNEL_ID) {
-      log(`telegram: posting to channel ${TG_CHANNEL_ID}...`);
-      const cr = await tg.postToChannel(TG_CHANNEL_ID, message, log);
-      log(cr.success ? 'telegram: channel post ✓' : `telegram: channel post failed: ${cr.error}`);
+    if (db.getGroupSendCountToday('telegram') >= TG_DAILY_LIMIT) {
+      log(`telegram: daily cap reached — stopping`);
+      break;
     }
-  } finally {
-    await tg.closeSession(client);
-    log('telegram: session closed.');
+
+    const result = await tg.postToChannel(target.id, message, log, { articleUrl: article.url });
+    if (result.success) {
+      db.recordGroupDelivery('telegram', target.name, article.url, runId);
+      if (article.url) db.recordDelivery(article.url, 'telegram', 'success', runId);
+      sentCount++;
+    } else {
+      log(`telegram: failed for "${target.name}": ${result.error}`);
+    }
+    db.recordRunPlatform(runId, 'telegram',
+      result.success ? 'success' : 'failed_permanent', article.url, result.error);
+
+    if (i < targets.length - 1) {
+      const delay = randomBetween(TG_INTER_MIN, TG_INTER_MAX);
+      await new Promise(r => setTimeout(r, delay));
+    }
   }
+  log(`telegram: sent to ${sentCount}/${targets.length} targets today`);
 }
 
 let runId;
