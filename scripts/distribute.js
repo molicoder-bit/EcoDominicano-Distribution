@@ -286,46 +286,101 @@ async function runTelegramMultiChat(article, runId, log, isTest) {
     return;
   }
 
-  // Post to all configured Bot API targets (channel + groups)
-  const targets = tg.getBotTargets();
-  if (targets.length === 0) {
-    log('telegram: no targets configured (set TELEGRAM_CHANNEL_ID / TELEGRAM_GROUP_IDS)');
+  const botTargets = tg.getBotTargets();
+  const gramjsOk = tg.hasUserSession();
+
+  if (botTargets.length === 0 && !gramjsOk) {
+    log('telegram: no Bot API targets and no GramJS session — set TELEGRAM_CHANNEL_ID and/or run telegram:login');
     db.recordRunPlatform(runId, 'telegram', 'skipped_by_policy', null, 'no targets');
     return;
   }
 
-  log(`telegram: posting to ${targets.length} targets`);
   let sentCount = 0;
 
-  for (let i = 0; i < targets.length; i++) {
-    const target = targets[i];
+  // ── Bot API: channel + groups where bot is admin ─────────────────────────
+  if (botTargets.length > 0) {
+    log(`telegram: Bot API — ${botTargets.length} target(s)`);
+    for (let i = 0; i < botTargets.length; i++) {
+      const target = botTargets[i];
 
-    if (db.wasGroupSentToday('telegram', target.name)) {
-      log(`telegram: skip "${target.name}" — already sent today`);
-      continue;
-    }
-    if (db.getGroupSendCountToday('telegram') >= TG_DAILY_LIMIT) {
-      log(`telegram: daily cap reached — stopping`);
-      break;
-    }
+      if (db.wasGroupSentToday('telegram', target.name)) {
+        log(`telegram: skip "${target.name}" — already sent today`);
+        continue;
+      }
+      if (db.getGroupSendCountToday('telegram') >= TG_DAILY_LIMIT) {
+        log('telegram: daily cap reached — stopping');
+        break;
+      }
 
-    const result = await tg.postToChannel(target.id, message, log, { articleUrl: article.url });
-    if (result.success) {
-      db.recordGroupDelivery('telegram', target.name, article.url, runId);
-      if (article.url) db.recordDelivery(article.url, 'telegram', 'success', runId);
-      sentCount++;
-    } else {
-      log(`telegram: failed for "${target.name}": ${result.error}`);
-    }
-    db.recordRunPlatform(runId, 'telegram',
-      result.success ? 'success' : 'failed_permanent', article.url, result.error);
+      const result = await tg.postToChannel(target.id, message, log, { articleUrl: article.url });
+      if (result.success) {
+        db.recordGroupDelivery('telegram', target.name, article.url, runId);
+        if (article.url) db.recordDelivery(article.url, 'telegram', 'success', runId);
+        sentCount++;
+      } else {
+        log(`telegram: failed for "${target.name}": ${result.error}`);
+      }
+      db.recordRunPlatform(runId, 'telegram',
+        result.success ? 'success' : 'failed_permanent', article.url, result.error);
 
-    if (i < targets.length - 1) {
-      const delay = randomBetween(TG_INTER_MIN, TG_INTER_MAX);
-      await new Promise(r => setTimeout(r, delay));
+      if (i < botTargets.length - 1) {
+        const delay = randomBetween(TG_INTER_MIN, TG_INTER_MAX);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  } else {
+    log('telegram: no Bot API targets — GramJS only');
+  }
+
+  // ── GramJS: any other groups you’re a member of (bot not admin) ───────────
+  if (!gramjsOk) {
+    log('telegram: GramJS skipped (optional — run telegram:login for member-only groups)');
+  } else {
+    let client;
+    try {
+      client = await tg.openSession(log);
+    } catch (e) {
+      log(`telegram: GramJS connect failed: ${e.message}`);
+    }
+    if (client) {
+      try {
+        const groups = await tg.scanGroups(client, 20, log);
+        for (let i = 0; i < groups.length; i++) {
+          const group = groups[i];
+
+          if (db.wasGroupSentToday('telegram', group.name)) {
+            log(`telegram: skip GramJS "${group.name}" — already sent today`);
+            continue;
+          }
+          if (db.getGroupSendCountToday('telegram') >= TG_DAILY_LIMIT) {
+            log('telegram: daily cap reached — stopping GramJS');
+            break;
+          }
+
+          const result = await tg.sendToGroup(client, group, message, log, { articleUrl: article.url });
+          if (result.success) {
+            db.recordGroupDelivery('telegram', group.name, article.url, runId);
+            if (article.url) db.recordDelivery(article.url, 'telegram', 'success', runId);
+            sentCount++;
+          } else {
+            log(`telegram: GramJS failed "${group.name}": ${result.error}`);
+          }
+          db.recordRunPlatform(runId, 'telegram',
+            result.success ? 'success' : 'failed_permanent', article.url, result.error);
+
+          if (i < groups.length - 1) {
+            const delay = randomBetween(TG_INTER_MIN, TG_INTER_MAX);
+            await new Promise((r) => setTimeout(r, delay));
+          }
+        }
+      } finally {
+        await tg.closeSession(client);
+        log('telegram: GramJS disconnected');
+      }
     }
   }
-  log(`telegram: sent to ${sentCount}/${targets.length} targets today`);
+
+  log(`telegram: finished — ${sentCount} send(s) this run (today total: ${db.getGroupSendCountToday('telegram')}/${TG_DAILY_LIMIT})`);
 }
 
 let runId;

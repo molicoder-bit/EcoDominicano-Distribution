@@ -161,16 +161,124 @@ function getBotTargets() {
   return targets;
 }
 
-// ─── GramJS stubs (kept for future use with non-admin groups) ─────────────────
+/** Set of chat_id strings from Bot API targets (for skipping duplicate GramJS sends). */
+function getBotTargetIdSet() {
+  return new Set(getBotTargets().map((t) => String(t.id).replace(/\s/g, '')));
+}
+
+function entityMatchesBotTarget(entity, botIds) {
+  if (!entity || !entity.className) return false;
+  if (entity.className === 'Chat') {
+    return botIds.has(`-${entity.id}`);
+  }
+  if (entity.className === 'Channel' && entity.megagroup) {
+    if (botIds.has(`-100${entity.id}`)) return true;
+    if (botIds.has(`-${entity.id}`)) return true;
+  }
+  return false;
+}
+
+function hasUserSession() {
+  if (!API_ID || !API_HASH) return false;
+  if (!fs.existsSync(SESSION_PATH)) return false;
+  return fs.readFileSync(SESSION_PATH, 'utf8').trim().length > 0;
+}
+
+// ─── GramJS (user account — groups where bot is not admin) ───────────────────
 
 async function openSession(log = console.log) {
-  throw new Error('GramJS session not needed — use Bot API targets (TELEGRAM_CHANNEL_ID / TELEGRAM_GROUP_IDS)');
+  if (!hasUserSession()) {
+    throw new Error('TG: no GramJS session — run npm run telegram:login on the VM');
+  }
+  const { TelegramClient } = require('telegram');
+  const { StringSession } = require('telegram/sessions');
+  const sessionStr = fs.readFileSync(SESSION_PATH, 'utf8').trim();
+  const client = new TelegramClient(new StringSession(sessionStr), API_ID, API_HASH, {
+    connectionRetries: 5,
+  });
+  client.setLogLevel('error');
+  await client.connect();
+  if (!(await client.isUserAuthorized())) {
+    throw new Error('TG: GramJS session expired — run telegram:login again');
+  }
+  log('TG(GramJS): connected as user');
+  return client;
 }
-async function scanGroups(client, limit = 20, log = console.log) { return []; }
-async function sendToGroup(client, group, message, log = console.log) {
-  return postToChannel(group.id, message, log);
+
+/**
+ * Megagroups + legacy groups; skips broadcast channels, Bot API targets, already-sent-today.
+ */
+async function scanGroups(client, limit = 20, log = console.log) {
+  const botIds = getBotTargetIdSet();
+  let sentToday = new Set();
+  try {
+    const db = require('../db');
+    sentToday = new Set(db.getGroupsSentToday('telegram'));
+    if (sentToday.size > 0) log(`TG(GramJS): already sent today: ${[...sentToday].join(', ')}`);
+  } catch { /* ignore */ }
+
+  const dialogs = await client.getDialogs({ limit: 400 });
+  const groups = [];
+
+  for (const dialog of dialogs) {
+    if (groups.length >= limit) break;
+    const e = dialog.entity;
+    const isLegacy = e.className === 'Chat';
+    const isMega = e.className === 'Channel' && e.megagroup === true;
+    if (!isLegacy && !isMega) continue;
+
+    if (entityMatchesBotTarget(e, botIds)) {
+      log(`TG(GramJS): skip "${dialog.title}" — same chat as Bot API target`);
+      continue;
+    }
+
+    const name = dialog.title || String(e.id);
+    if (sentToday.has(name)) {
+      log(`TG(GramJS): skip "${name}" — already sent today`);
+      continue;
+    }
+    groups.push({ name, entity: e });
+    log(`TG(GramJS): candidate "${name}"`);
+  }
+
+  log(`TG(GramJS): ${groups.length} group(s) via user session`);
+  return groups;
 }
-async function closeSession(client) { /* no-op */ }
+
+/**
+ * Send as logged-in user (HTML). Uses og:image + sendFile when possible.
+ */
+async function sendToGroup(client, group, message, log = console.log, opts = {}) {
+  const articleUrl = opts.articleUrl || null;
+  let imageUrl = opts.imageUrl || null;
+  if (!imageUrl && articleUrl) {
+    imageUrl = await fetchOgImage(articleUrl);
+    if (imageUrl) log(`TG(GramJS): og:image for "${group.name}"`);
+  }
+
+  try {
+    if (imageUrl) {
+      await client.sendFile(group.entity, {
+        file: imageUrl,
+        caption: captionForPhoto(message),
+        parseMode: 'html',
+      });
+    } else {
+      await client.sendMessage(group.entity, { message, parseMode: 'html' });
+    }
+    log(`TG(GramJS): sent to "${group.name}"`);
+    return { success: true };
+  } catch (e) {
+    const retryAfter = typeof e.seconds === 'number' ? e.seconds : null;
+    log(`TG(GramJS): failed "${group.name}": ${e.message}`);
+    return { success: false, error: e.message, retryAfter };
+  }
+}
+
+async function closeSession(client) {
+  if (!client) return;
+  try { await client.disconnect(); } catch { /* ignore */ }
+}
 
 // ─── Legacy single-post for generic platform loop ────────────────────────────
 
@@ -190,5 +298,6 @@ module.exports = {
   postToChannel,
   closeSession,
   getBotTargets,
+  hasUserSession,
   fetchOgImage,
 };
