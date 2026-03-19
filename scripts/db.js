@@ -76,6 +76,14 @@ function initSchema(d) {
     CREATE INDEX IF NOT EXISTS idx_gd_platform_date ON group_deliveries(platform, sent_at);
     CREATE INDEX IF NOT EXISTS idx_gd_group ON group_deliveries(platform, group_name, sent_at);
   `);
+  migrateGroupDeliveriesViaBot(d);
+}
+
+function migrateGroupDeliveriesViaBot(d) {
+  const cols = d.prepare('PRAGMA table_info(group_deliveries)').all();
+  if (!cols.some((c) => c.name === 'via_bot')) {
+    d.exec('ALTER TABLE group_deliveries ADD COLUMN via_bot INTEGER DEFAULT 0');
+  }
 }
 
 function createRun(triggerType) {
@@ -163,25 +171,39 @@ function getTodayStartISO() {
   return new Date(utcMidnight.getTime() + offsetMs).toISOString();
 }
 
-function recordGroupDelivery(platform, groupName, articleUrl, runId) {
+/** viaBot=true: Bot API channel/admin — does not count toward GramJS daily cap. */
+function recordGroupDelivery(platform, groupName, articleUrl, runId, viaBot = false) {
   getDb().prepare(
-    'INSERT INTO group_deliveries (platform, group_name, article_url, sent_at, run_id) VALUES (?, ?, ?, ?, ?)'
-  ).run(platform, groupName, articleUrl || null, new Date().toISOString(), runId || null);
+    'INSERT INTO group_deliveries (platform, group_name, article_url, sent_at, run_id, via_bot) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(
+    platform,
+    groupName,
+    articleUrl || null,
+    new Date().toISOString(),
+    runId || null,
+    viaBot ? 1 : 0,
+  );
 }
 
 /** Returns all group names sent to on this platform today (local date). */
-function getGroupsSentToday(platform) {
-  const rows = getDb().prepare(
-    'SELECT DISTINCT group_name FROM group_deliveries WHERE platform = ? AND sent_at >= ?'
-  ).all(platform, getTodayStartISO());
-  return rows.map(r => r.group_name);
+function getGroupsSentToday(platform, options = {}) {
+  let sql = 'SELECT DISTINCT group_name FROM group_deliveries WHERE platform = ? AND sent_at >= ?';
+  const params = [platform, getTodayStartISO()];
+  if (options.gramjsOnly) {
+    sql += ' AND IFNULL(via_bot, 0) = 0';
+  }
+  const rows = getDb().prepare(sql).all(...params);
+  return rows.map((r) => r.group_name);
 }
 
-/** Returns total individual group sends today for a platform. */
-function getGroupSendCountToday(platform) {
-  const row = getDb().prepare(
-    'SELECT COUNT(*) as c FROM group_deliveries WHERE platform = ? AND sent_at >= ?'
-  ).get(platform, getTodayStartISO());
+/** Returns total sends today. options.gramjsOnly: only user-session groups (excludes bot channel/admin). */
+function getGroupSendCountToday(platform, options = {}) {
+  let sql = 'SELECT COUNT(*) as c FROM group_deliveries WHERE platform = ? AND sent_at >= ?';
+  const params = [platform, getTodayStartISO()];
+  if (options.gramjsOnly) {
+    sql += ' AND IFNULL(via_bot, 0) = 0';
+  }
+  const row = getDb().prepare(sql).get(...params);
   return row ? row.c : 0;
 }
 
@@ -200,8 +222,8 @@ function wasGroupSentToday(platform, groupName) {
  * status: 'green' | 'yellow' | 'red'
  */
 function getPlatformDailyStatus(platform, limits) {
-  const count = getGroupSendCountToday(platform);
-  const { dailyLimit = 25, yellowAt = 20 } = limits || {};
+  const { dailyLimit = 25, yellowAt = 20, countOverride } = limits || {};
+  const count = countOverride !== undefined ? countOverride : getGroupSendCountToday(platform);
   let status, reason;
   if (count >= dailyLimit) {
     status = 'red';

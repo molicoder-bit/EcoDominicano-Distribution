@@ -5,17 +5,19 @@
  */
 require('dotenv').config({ path: require('path').join(__dirname, '../config/.env') });
 const db = require('./db');
+const { getGramjsDailyLimit, getGramjsYellowAt } = require('./platforms/telegram');
 
 const PLATFORM_LIMITS = {
   whatsappWeb: {
     dailyLimit: parseInt(process.env.WA_DAILY_LIMIT || '25', 10),
-    yellowAt:   parseInt(process.env.WA_DAILY_YELLOW || '20', 10),
+    yellowAt: parseInt(process.env.WA_DAILY_YELLOW || '20', 10),
     label: 'WhatsApp',
   },
   telegram: {
-    dailyLimit: 50,
-    yellowAt: 40,
-    label: 'Telegram',
+    dailyLimit: getGramjsDailyLimit(),
+    yellowAt: getGramjsYellowAt(),
+    label: 'Telegram (GramJS groups)',
+    gramjsOnly: true,
   },
   facebookPage: {
     dailyLimit: 10,
@@ -26,8 +28,18 @@ const PLATFORM_LIMITS = {
 
 const result = {};
 for (const [platform, limits] of Object.entries(PLATFORM_LIMITS)) {
-  const s = db.getPlatformDailyStatus(platform, limits);
-  const groupsSent = platform === 'whatsappWeb' ? db.getGroupsSentToday(platform) : [];
+  const gramjsOnly = !!limits.gramjsOnly;
+  const { gramjsOnly: _g, ...restLimits } = limits;
+  const count = db.getGroupSendCountToday(platform, gramjsOnly ? { gramjsOnly: true } : {});
+  const s = db.getPlatformDailyStatus(platform, {
+    ...restLimits,
+    countOverride: count,
+  });
+  const groupsSent = platform === 'whatsappWeb'
+    ? db.getGroupsSentToday(platform)
+    : platform === 'telegram'
+      ? db.getGroupsSentToday(platform, { gramjsOnly: true })
+      : [];
   result[platform] = {
     label: limits.label,
     ...s,

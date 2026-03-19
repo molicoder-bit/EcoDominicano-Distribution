@@ -37,12 +37,10 @@ const WA_DAILY_LIMIT = parseInt(process.env.WA_DAILY_LIMIT || '25', 10);
 const WA_DAILY_YELLOW = parseInt(process.env.WA_DAILY_YELLOW || '20', 10);
 
 const tg = require('./platforms/telegram');
-const TG_CHANNEL_ID  = process.env.TELEGRAM_CHANNEL_ID || '';
-const TG_TEST_CHAT   = process.env.TELEGRAM_TEST_CHAT_ID || '';
-const TG_DAILY_LIMIT = parseInt(process.env.TELEGRAM_DAILY_LIMIT  || '50', 10);
-const TG_DAILY_YELLOW = parseInt(process.env.TELEGRAM_DAILY_YELLOW || '40', 10);
-const TG_INTER_MIN   = parseInt(process.env.TELEGRAM_INTER_DELAY_MIN || '2000', 10);
-const TG_INTER_MAX   = parseInt(process.env.TELEGRAM_INTER_DELAY_MAX || '4000', 10);
+const TG_CHANNEL_ID   = process.env.TELEGRAM_CHANNEL_ID || '';
+const TG_TEST_GROUP   = process.env.TELEGRAM_TEST_GROUP_ID || ''; // no DMs — test group or first bot target
+const TG_INTER_MIN    = parseInt(process.env.TELEGRAM_INTER_DELAY_MIN || '2000', 10);
+const TG_INTER_MAX    = parseInt(process.env.TELEGRAM_INTER_DELAY_MAX || '4000', 10);
 
 function randomBetween(min, max) {
   return min + Math.floor(Math.random() * (max - min + 1));
@@ -265,24 +263,17 @@ async function runTelegramMultiChat(article, runId, log, isTest) {
     message = `<b>${safe}</b>\n\n${article.url || ''}`;
   }
 
-  // TEST MODE: send to personal chat only
+  // TEST MODE: group/channel only (no DMs)
   if (isTest) {
-    if (!TG_TEST_CHAT) {
-      log('telegram test: TELEGRAM_TEST_CHAT_ID not set — skipping');
+    const botTargetsEarly = tg.getBotTargets();
+    const testId = TG_TEST_GROUP || botTargetsEarly[0]?.id;
+    if (!testId) {
+      log('telegram test: set TELEGRAM_TEST_GROUP_ID or configure channel/group Bot targets — skipping');
       return;
     }
-    log(`telegram test: sending to personal chat ${TG_TEST_CHAT}`);
-    const r = await tg.postToChannel(TG_TEST_CHAT, message, log, { articleUrl: article.url });
+    log(`telegram test: sending to ${testId} (no DMs)`);
+    const r = await tg.postToChannel(testId, message, log, { articleUrl: article.url });
     log(r.success ? 'telegram test: delivered ✓' : `telegram test: failed — ${r.error}`);
-    return;
-  }
-
-  // Daily cap check
-  const dailyStatus = db.getPlatformDailyStatus('telegram', { dailyLimit: TG_DAILY_LIMIT, yellowAt: TG_DAILY_YELLOW });
-  log(`telegram: daily status — ${dailyStatus.reason}`);
-  if (dailyStatus.status === 'red') {
-    log('telegram: daily cap reached — skipping');
-    db.recordRunPlatform(runId, 'telegram', 'skipped_by_policy', article.url, dailyStatus.reason);
     return;
   }
 
@@ -295,9 +286,13 @@ async function runTelegramMultiChat(article, runId, log, isTest) {
     return;
   }
 
+  const gramjsLimit = tg.getGramjsDailyLimit();
+  const gramjsUsedStart = db.getGroupSendCountToday('telegram', { gramjsOnly: true });
+  log(`telegram: GramJS cap ${gramjsUsedStart}/${gramjsLimit} today (ramp start ${process.env.TELEGRAM_RAMP_START_DATE || 'unset'} → phase2 after ${process.env.TELEGRAM_RAMP_DAYS || 20}d)`);
+
   let sentCount = 0;
 
-  // ── Bot API: channel + groups where bot is admin ─────────────────────────
+  // ── Bot API: channel + your admin groups (not counted toward GramJS cap) ──
   if (botTargets.length > 0) {
     log(`telegram: Bot API — ${botTargets.length} target(s)`);
     for (let i = 0; i < botTargets.length; i++) {
@@ -307,14 +302,10 @@ async function runTelegramMultiChat(article, runId, log, isTest) {
         log(`telegram: skip "${target.name}" — already sent today`);
         continue;
       }
-      if (db.getGroupSendCountToday('telegram') >= TG_DAILY_LIMIT) {
-        log('telegram: daily cap reached — stopping');
-        break;
-      }
 
       const result = await tg.postToChannel(target.id, message, log, { articleUrl: article.url });
       if (result.success) {
-        db.recordGroupDelivery('telegram', target.name, article.url, runId);
+        db.recordGroupDelivery('telegram', target.name, article.url, runId, true);
         if (article.url) db.recordDelivery(article.url, 'telegram', 'success', runId);
         sentCount++;
       } else {
@@ -344,33 +335,38 @@ async function runTelegramMultiChat(article, runId, log, isTest) {
     }
     if (client) {
       try {
-        const groups = await tg.scanGroups(client, 20, log);
-        for (let i = 0; i < groups.length; i++) {
-          const group = groups[i];
+        const gramjsRemaining = gramjsLimit - db.getGroupSendCountToday('telegram', { gramjsOnly: true });
+        if (gramjsRemaining <= 0) {
+          log('telegram: GramJS daily cap reached — skipping member groups');
+        } else {
+          const groups = await tg.scanGroups(client, gramjsRemaining, log);
+          for (let i = 0; i < groups.length; i++) {
+            const group = groups[i];
 
-          if (db.wasGroupSentToday('telegram', group.name)) {
-            log(`telegram: skip GramJS "${group.name}" — already sent today`);
-            continue;
-          }
-          if (db.getGroupSendCountToday('telegram') >= TG_DAILY_LIMIT) {
-            log('telegram: daily cap reached — stopping GramJS');
-            break;
-          }
+            if (db.wasGroupSentToday('telegram', group.name)) {
+              log(`telegram: skip GramJS "${group.name}" — already sent today`);
+              continue;
+            }
+            if (db.getGroupSendCountToday('telegram', { gramjsOnly: true }) >= gramjsLimit) {
+              log('telegram: GramJS cap — stopping');
+              break;
+            }
 
-          const result = await tg.sendToGroup(client, group, message, log, { articleUrl: article.url });
-          if (result.success) {
-            db.recordGroupDelivery('telegram', group.name, article.url, runId);
-            if (article.url) db.recordDelivery(article.url, 'telegram', 'success', runId);
-            sentCount++;
-          } else {
-            log(`telegram: GramJS failed "${group.name}": ${result.error}`);
-          }
-          db.recordRunPlatform(runId, 'telegram',
-            result.success ? 'success' : 'failed_permanent', article.url, result.error);
+            const result = await tg.sendToGroup(client, group, message, log, { articleUrl: article.url });
+            if (result.success) {
+              db.recordGroupDelivery('telegram', group.name, article.url, runId, false);
+              if (article.url) db.recordDelivery(article.url, 'telegram', 'success', runId);
+              sentCount++;
+            } else {
+              log(`telegram: GramJS failed "${group.name}": ${result.error}`);
+            }
+            db.recordRunPlatform(runId, 'telegram',
+              result.success ? 'success' : 'failed_permanent', article.url, result.error);
 
-          if (i < groups.length - 1) {
-            const delay = randomBetween(TG_INTER_MIN, TG_INTER_MAX);
-            await new Promise((r) => setTimeout(r, delay));
+            if (i < groups.length - 1) {
+              const delay = randomBetween(TG_INTER_MIN, TG_INTER_MAX);
+              await new Promise((r) => setTimeout(r, delay));
+            }
           }
         }
       } finally {
@@ -380,7 +376,8 @@ async function runTelegramMultiChat(article, runId, log, isTest) {
     }
   }
 
-  log(`telegram: finished — ${sentCount} send(s) this run (today total: ${db.getGroupSendCountToday('telegram')}/${TG_DAILY_LIMIT})`);
+  const gramjsEnd = db.getGroupSendCountToday('telegram', { gramjsOnly: true });
+  log(`telegram: finished — ${sentCount} send(s) this run (GramJS today: ${gramjsEnd}/${gramjsLimit})`);
 }
 
 let runId;

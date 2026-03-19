@@ -6,6 +6,7 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../config/.env') });
 const {
   getBotTargets,
+  getGramjsDailyLimit,
   hasUserSession,
   openSession,
   scanGroups,
@@ -42,6 +43,7 @@ async function main() {
 
   const allCount = botTargets.length + gramjsNames.length;
   console.log(`\nFound ${allCount} groups: ${[...botTargets.map((t) => t.name), ...gramjsNames].join(', ')}`);
+  console.log(`\nGramJS cap today: ${getGramjsDailyLimit()} member-group posts (bot channel/admin exempt)`);
 
   db.close();
 }

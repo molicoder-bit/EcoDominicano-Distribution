@@ -213,7 +213,7 @@ async function scanGroups(client, limit = 20, log = console.log) {
   let sentToday = new Set();
   try {
     const db = require('../db');
-    sentToday = new Set(db.getGroupsSentToday('telegram'));
+    sentToday = new Set(db.getGroupsSentToday('telegram', { gramjsOnly: true }));
     if (sentToday.size > 0) log(`TG(GramJS): already sent today: ${[...sentToday].join(', ')}`);
   } catch { /* ignore */ }
 
@@ -223,6 +223,9 @@ async function scanGroups(client, limit = 20, log = console.log) {
   for (const dialog of dialogs) {
     if (groups.length >= limit) break;
     const e = dialog.entity;
+    // Never post to DMs / private chats
+    if (e.className === 'User') continue;
+
     const isLegacy = e.className === 'Chat';
     const isMega = e.className === 'Channel' && e.megagroup === true;
     if (!isLegacy && !isMega) continue;
@@ -282,6 +285,45 @@ async function closeSession(client) {
 
 // ─── Legacy single-post for generic platform loop ────────────────────────────
 
+/**
+ * Max GramJS (member-only) posts per calendar day in TIMEZONE.
+ * Phase 1: TELEGRAM_GRAMJS_CAP_PHASE1 for TELEGRAM_RAMP_DAYS from TELEGRAM_RAMP_START_DATE.
+ * Phase 2: TELEGRAM_GRAMJS_CAP_PHASE2 after that. Bot channel/admin posts do not use this cap.
+ */
+function calendarDayDiffUTC(isoA, isoB) {
+  const toUtc = (s) => {
+    const [y, m, d] = String(s).slice(0, 10).split('-').map(Number);
+    if (!y || !m || !d) return NaN;
+    return Date.UTC(y, m - 1, d);
+  };
+  const ua = toUtc(isoA);
+  const ub = toUtc(isoB);
+  if (Number.isNaN(ua) || Number.isNaN(ub)) return NaN;
+  return Math.floor((ub - ua) / 86400000);
+}
+
+function getGramjsDailyLimit() {
+  const startStr = (process.env.TELEGRAM_RAMP_START_DATE || '').trim().slice(0, 10);
+  const rampDays = parseInt(process.env.TELEGRAM_RAMP_DAYS || '20', 10);
+  const cap1 = parseInt(process.env.TELEGRAM_GRAMJS_CAP_PHASE1 || '15', 10);
+  const cap2 = parseInt(process.env.TELEGRAM_GRAMJS_CAP_PHASE2 || '30', 10);
+  if (!startStr) return cap2;
+  const tz = process.env.TIMEZONE || 'America/Santo_Domingo';
+  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+  const diffDays = calendarDayDiffUTC(startStr, todayStr);
+  if (Number.isNaN(diffDays)) return cap1;
+  if (diffDays < 0) return cap1;
+  if (diffDays < rampDays) return cap1;
+  return cap2;
+}
+
+function getGramjsYellowAt() {
+  const lim = getGramjsDailyLimit();
+  const fixed = parseInt(process.env.TELEGRAM_GRAMJS_YELLOW_AT || '0', 10);
+  if (fixed > 0) return Math.max(1, Math.min(fixed, lim - 1));
+  return Math.max(1, Math.min(lim - 1, Math.floor(lim * 0.87)));
+}
+
 async function post(article, opts = {}) {
   const log = opts.log || console.log;
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
@@ -300,4 +342,6 @@ module.exports = {
   getBotTargets,
   hasUserSession,
   fetchOgImage,
+  getGramjsDailyLimit,
+  getGramjsYellowAt,
 };
