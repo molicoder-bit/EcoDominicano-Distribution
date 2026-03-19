@@ -6,7 +6,9 @@
   "scripts": {
     "distribute": "PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright node scripts/distribute.js",
     "whatsapp:login": "PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright node scripts/whatsapp-login.js",
-    "whatsapp:scan": "PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright node scripts/wa-group-scanner.js"
+    "whatsapp:scan": "PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright node scripts/wa-group-scanner.js",
+    "telegram:login": "node scripts/telegram-login.js",
+    "telegram:scan": "node scripts/tg-group-scanner.js"
   },
   "engines": {
     "node": ">=20"

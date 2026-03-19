@@ -146,6 +146,23 @@ function setCooldown(platform, untilIso, reason) {
 
 // ─── Group delivery tracking ───────────────────────────────────────────────────
 
+/**
+ * Returns ISO string for midnight of today in the configured local timezone.
+ * Fixes the UTC-vs-local issue on the VM (VM runs UTC, DR is UTC-4).
+ */
+function getTodayStartISO() {
+  const tz = process.env.TIMEZONE || 'America/Santo_Domingo';
+  const now = new Date();
+  // Get today's date string (YYYY-MM-DD) in the target timezone
+  const dateStr = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now);
+  // Compute the UTC offset at this moment by comparing raw UTC vs locale-parsed time
+  const fakeParsed = new Date(now.toLocaleString('en-US', { timeZone: tz }));
+  const offsetMs = now.getTime() - fakeParsed.getTime(); // negative for UTC+, positive for UTC-
+  // Midnight UTC of target date + offset = midnight in target timezone expressed as UTC
+  const utcMidnight = new Date(`${dateStr}T00:00:00.000Z`);
+  return new Date(utcMidnight.getTime() + offsetMs).toISOString();
+}
+
 function recordGroupDelivery(platform, groupName, articleUrl, runId) {
   getDb().prepare(
     'INSERT INTO group_deliveries (platform, group_name, article_url, sent_at, run_id) VALUES (?, ?, ?, ?, ?)'
@@ -154,31 +171,25 @@ function recordGroupDelivery(platform, groupName, articleUrl, runId) {
 
 /** Returns all group names sent to on this platform today (local date). */
 function getGroupsSentToday(platform) {
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
   const rows = getDb().prepare(
     'SELECT DISTINCT group_name FROM group_deliveries WHERE platform = ? AND sent_at >= ?'
-  ).all(platform, todayStart.toISOString());
+  ).all(platform, getTodayStartISO());
   return rows.map(r => r.group_name);
 }
 
 /** Returns total individual group sends today for a platform. */
 function getGroupSendCountToday(platform) {
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
   const row = getDb().prepare(
     'SELECT COUNT(*) as c FROM group_deliveries WHERE platform = ? AND sent_at >= ?'
-  ).get(platform, todayStart.toISOString());
+  ).get(platform, getTodayStartISO());
   return row ? row.c : 0;
 }
 
 /** True if this specific group already received a message today. */
 function wasGroupSentToday(platform, groupName) {
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
   const row = getDb().prepare(
     'SELECT 1 FROM group_deliveries WHERE platform = ? AND group_name = ? AND sent_at >= ? LIMIT 1'
-  ).get(platform, groupName, todayStart.toISOString());
+  ).get(platform, groupName, getTodayStartISO());
   return !!row;
 }
 

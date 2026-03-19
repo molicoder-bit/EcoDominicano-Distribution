@@ -36,8 +36,37 @@ const WA_TEST_PHONE = process.env.WA_TEST_PHONE || '';
 const WA_DAILY_LIMIT = parseInt(process.env.WA_DAILY_LIMIT || '25', 10);
 const WA_DAILY_YELLOW = parseInt(process.env.WA_DAILY_YELLOW || '20', 10);
 
+const tg = require('./platforms/telegram');
+const TG_CHANNEL_ID  = process.env.TELEGRAM_CHANNEL_ID || '';
+const TG_TEST_CHAT   = process.env.TELEGRAM_TEST_CHAT_ID || '';
+const TG_DAILY_LIMIT = parseInt(process.env.TELEGRAM_DAILY_LIMIT  || '50', 10);
+const TG_DAILY_YELLOW = parseInt(process.env.TELEGRAM_DAILY_YELLOW || '40', 10);
+const TG_INTER_MIN   = parseInt(process.env.TELEGRAM_INTER_DELAY_MIN || '2000', 10);
+const TG_INTER_MAX   = parseInt(process.env.TELEGRAM_INTER_DELAY_MAX || '4000', 10);
+
 function randomBetween(min, max) {
   return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+function buildTelegramPrompt(article) {
+  const title = (article.title || 'Sin título').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return `Eres un dominicano gracioso compartiendo noticias en Telegram. Escribe UN solo mensaje corto, sin comillas, sin introducción, sin explicación.
+
+FORMATO OBLIGATORIO (usa exactamente estas etiquetas HTML):
+<b>${article.title}</b>
+[1-2 oraciones cómicas y dominicanizadas — usa expresiones como "diache", "qué vaina", "ta' bueno eso", "se formó el despelote", "mano", "brutísimo", etc.]
+${article.url || ''}
+
+EJEMPLO del tono (NO copies este ejemplo):
+<b>Apagón deja sin luz a medio Santo Domingo</b>
+Diache mano, otra vez lo mismo 😂 El CDEEE diciendo que "es temporal" desde el 1965. Ta' to' el país rezando pa' que llegue la luz antes de que se dañe el pollo.
+https://ecodominicano.com/ejemplo
+
+Noticia de hoy:
+Título: ${article.title}
+Resumen: ${article.summary || article.title}
+
+Escribe el mensaje ahora (solo el mensaje, nada más):`;
 }
 
 function buildNewsPrompt(article) {
@@ -218,6 +247,101 @@ async function runWhatsAppMultiGroup(article, _poster, runId, _settings, log, is
   }
 }
 
+// ─── Telegram multi-chat distribution ────────────────────────────────────────
+
+async function runTelegramMultiChat(article, runId, log, isTest) {
+  // Generate message via Ollama
+  let message;
+  try {
+    const prompt = buildTelegramPrompt(article);
+    message = await ollamaGenerate(prompt);
+    // Ensure title uses HTML bold if Ollama omitted it
+    if (article.url && !message.includes(article.url)) {
+      message = `${message.trim()}\n\n${article.url}`;
+    }
+  } catch (e) {
+    log(`telegram ollama failed: ${e.message} — using fallback`);
+    const safe = (article.title || 'Sin título').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    message = `<b>${safe}</b>\n\n${article.url || ''}`;
+  }
+
+  // TEST MODE: send to personal chat only
+  if (isTest) {
+    if (!TG_TEST_CHAT) {
+      log('telegram test: TELEGRAM_TEST_CHAT_ID not set — skipping');
+      return;
+    }
+    log(`telegram test: sending to personal chat ${TG_TEST_CHAT}`);
+    const r = await tg.postToChannel(TG_TEST_CHAT, message, log);
+    log(r.success ? 'telegram test: delivered ✓' : `telegram test: failed — ${r.error}`);
+    return;
+  }
+
+  // Daily cap check
+  const dailyStatus = db.getPlatformDailyStatus('telegram', { dailyLimit: TG_DAILY_LIMIT, yellowAt: TG_DAILY_YELLOW });
+  log(`telegram: daily status — ${dailyStatus.reason}`);
+  if (dailyStatus.status === 'red') {
+    log('telegram: daily cap reached — skipping');
+    db.recordRunPlatform(runId, 'telegram', 'skipped_by_policy', article.url, dailyStatus.reason);
+    return;
+  }
+
+  // Post to groups via GramJS
+  let client;
+  try {
+    client = await tg.openSession(log);
+  } catch (e) {
+    log(`telegram: failed to open session: ${e.message}`);
+    db.recordRunPlatform(runId, 'telegram', 'failed_permanent', article.url, e.message);
+    return;
+  }
+
+  try {
+    const groups = await tg.scanGroups(client, 20, log);
+    let sentCount = 0;
+
+    for (let i = 0; i < groups.length; i++) {
+      const group = groups[i];
+
+      if (db.wasGroupSentToday('telegram', group.name)) {
+        log(`telegram: skip "${group.name}" — already sent today`);
+        continue;
+      }
+      if (db.getGroupSendCountToday('telegram') >= TG_DAILY_LIMIT) {
+        log(`telegram: daily cap reached mid-run — stopping`);
+        break;
+      }
+
+      const result = await tg.sendToGroup(client, group, message, log);
+      if (result.success) {
+        db.recordGroupDelivery('telegram', group.name, article.url, runId);
+        if (article.url) db.recordDelivery(article.url, 'telegram', 'success', runId);
+        sentCount++;
+      } else {
+        log(`telegram: failed for "${group.name}": ${result.error}`);
+      }
+      db.recordRunPlatform(runId, 'telegram',
+        result.success ? 'success' : 'failed_permanent', article.url, result.error);
+
+      if (i < groups.length - 1) {
+        const delay = randomBetween(TG_INTER_MIN, TG_INTER_MAX);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+    log(`telegram: sent to ${sentCount} groups (total today: ${db.getGroupSendCountToday('telegram')}/${TG_DAILY_LIMIT})`);
+
+    // Post to official channel via Bot API
+    if (TG_CHANNEL_ID) {
+      log(`telegram: posting to channel ${TG_CHANNEL_ID}...`);
+      const cr = await tg.postToChannel(TG_CHANNEL_ID, message, log);
+      log(cr.success ? 'telegram: channel post ✓' : `telegram: channel post failed: ${cr.error}`);
+    }
+  } finally {
+    await tg.closeSession(client);
+    log('telegram: session closed.');
+  }
+}
+
 let runId;
 
 async function run() {
@@ -279,6 +403,11 @@ async function run() {
 
       if (platform === 'whatsappWeb') {
         await runWhatsAppMultiGroup(article, poster, runId, settings, log, isTest);
+        continue;
+      }
+
+      if (platform === 'telegram') {
+        await runTelegramMultiChat(article, runId, log, isTest);
         continue;
       }
 
