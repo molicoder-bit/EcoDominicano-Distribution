@@ -19,6 +19,7 @@ const platforms = {
   facebookGroups: require('./platforms/facebook'),
   whatsappWeb: require('./platforms/whatsapp'),
 };
+const reddit = platforms.reddit;
 const wa = require('./platforms/whatsapp');
 
 const args = process.argv.slice(2);
@@ -37,6 +38,9 @@ const WA_DAILY_LIMIT = parseInt(process.env.WA_DAILY_LIMIT || '25', 10);
 const WA_DAILY_YELLOW = parseInt(process.env.WA_DAILY_YELLOW || '20', 10);
 
 const tg = require('./platforms/telegram');
+
+const REDDIT_DAILY_LIMIT = parseInt(process.env.REDDIT_DAILY_LIMIT || '5', 10);
+const REDDIT_DAILY_YELLOW = parseInt(process.env.REDDIT_DAILY_YELLOW || '4', 10);
 const TG_CHANNEL_ID   = process.env.TELEGRAM_CHANNEL_ID || '';
 const TG_TEST_GROUP   = process.env.TELEGRAM_TEST_GROUP_ID || ''; // no DMs — test group or first bot target
 const TG_INTER_MIN    = parseInt(process.env.TELEGRAM_INTER_DELAY_MIN || '2000', 10);
@@ -85,6 +89,88 @@ Título: ${article.title}
 Resumen: ${article.summary || article.title}
 
 Escribe el mensaje ahora:`;
+}
+
+function buildRedditTitlePrompt(article) {
+  return `You write ONE Reddit link-post title only (English or Spanish OK). Rules:
+- Output ONLY the title line, no quotes, no "Title:", max 200 characters.
+- Accurate to the story — no clickbait lies. Light Dominican flavor allowed if natural.
+- Do not include the URL.
+
+Headline: ${article.title}
+Summary: ${article.summary || article.title}
+
+Title:`;
+}
+
+async function runRedditPost(article, runId, log, isTest) {
+  const testSub = (process.env.REDDIT_SUBREDDIT_TEST || '').replace(/^r\//, '').trim();
+  const liveSub = (process.env.REDDIT_SUBREDDIT || '').replace(/^r\//, '').trim();
+
+  if (isTest) {
+    if (!testSub) {
+      log('reddit test: set REDDIT_SUBREDDIT_TEST (a sub you moderate, e.g. EcoDominicano_test) — skipping');
+      return;
+    }
+  } else {
+    if (!liveSub) {
+      log('reddit: REDDIT_SUBREDDIT not set — skipping');
+      db.recordRunPlatform(runId, 'reddit', 'skipped_by_policy', null, 'no subreddit');
+      return;
+    }
+    const dailyStatus = db.getPlatformDailyStatus('reddit', {
+      dailyLimit: REDDIT_DAILY_LIMIT,
+      yellowAt: REDDIT_DAILY_YELLOW,
+      countOverride: db.getSuccessCountToday('reddit'),
+    });
+    log(`reddit: ${dailyStatus.reason}`);
+    if (dailyStatus.status === 'red') {
+      log('reddit: daily cap — skipping');
+      db.recordRunPlatform(runId, 'reddit', 'skipped_by_policy', article.url, dailyStatus.reason);
+      return;
+    }
+    if (article.url && db.hasDelivered(article.url, 'reddit')) {
+      log('reddit: this article URL was already posted — skipping');
+      db.recordRunPlatform(runId, 'reddit', 'skipped_by_policy', article.url, 'already posted');
+      return;
+    }
+  }
+
+  let title = (article.title || 'Sin título').slice(0, 300);
+  if (process.env.REDDIT_USE_OLLAMA !== '0') {
+    try {
+      const raw = await ollamaGenerate(buildRedditTitlePrompt(article));
+      title = raw.split('\n')[0].trim().replace(/^["'`]+|["'`]+$/g, '').slice(0, 300);
+    } catch (e) {
+      log(`reddit: ollama title skipped (${e.message})`);
+    }
+  }
+
+  const sub = isTest ? testSub : liveSub;
+  const result = await reddit.post(article, { log, title, subreddit: sub });
+  const postedAt = result.success ? new Date().toISOString() : null;
+
+  if (result.success) {
+    if (!isTest) {
+      db.recordDelivery(article.url, 'reddit', 'success', runId);
+    }
+    log(`reddit: posted ✓ ${result.postUrl || ''}`);
+  } else {
+    log(`reddit: failed — ${result.error}`);
+    if (result.retryAfter && result.retryAfter > 3600) {
+      const until = new Date(Date.now() + result.retryAfter * 1000).toISOString();
+      db.setCooldown('reddit', until, 'rate_limited');
+    }
+  }
+
+  db.recordRunPlatform(
+    runId,
+    'reddit',
+    result.success ? 'success' : (result.error === 'rate_limited' ? 'failed_retryable' : 'failed_permanent'),
+    article.url,
+    result.error,
+    postedAt,
+  );
 }
 
 function acquireLock() {
@@ -441,6 +527,11 @@ async function run() {
 
       if (platform === 'whatsappWeb') {
         await runWhatsAppMultiGroup(article, poster, runId, settings, log, isTest);
+        continue;
+      }
+
+      if (platform === 'reddit') {
+        await runRedditPost(article, runId, log, isTest);
         continue;
       }
 

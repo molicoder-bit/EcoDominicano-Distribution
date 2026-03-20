@@ -8,7 +8,10 @@
     "whatsapp:login": "PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright node scripts/whatsapp-login.js",
     "whatsapp:scan": "PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright node scripts/wa-group-scanner.js",
     "telegram:login": "node scripts/telegram-login.js",
-    "telegram:scan": "node scripts/tg-group-scanner.js"
+    "telegram:scan": "node scripts/tg-group-scanner.js",
+    "reddit:token": "node scripts/reddit-token-helper.js",
+    "reddit:test": "node scripts/distribute.js --test --platform=reddit",
+    "reddit:live": "node scripts/distribute.js --platform=reddit"
   },
   "engines": {
     "node": ">=20"

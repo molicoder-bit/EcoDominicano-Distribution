@@ -39,6 +39,14 @@ Then verify: `sudo -u ecodist /opt/ecodominicano-distributor/run-distribute.sh`
 4. Configure `config/settings.json` from `config/settings.example.json`
 5. Run `npm run distribute` for manual run, or enable the daily systemd timer
 
+### Reddit (API, no browser)
+
+1. Copy `REDDIT_*` keys from `config/.env.example` into `config/.env`.
+2. Create a Reddit app; set **redirect URI** to the same value as `REDDIT_REDIRECT_URI` (default `http://localhost:8080`).
+3. Run `npm run reddit:token` once, approve in browser, paste the redirect URL → append printed `REDDIT_REFRESH_TOKEN` to `.env`.
+4. Set `REDDIT_SUBREDDIT_TEST` and `REDDIT_SUBREDDIT`; ensure `reddit.enabled` in `config/settings.json`.
+5. `npm run reddit:test` then `npm run reddit:live` when ready. Details: [docs/REDDIT_SETUP.md](docs/REDDIT_SETUP.md).
+
 ## Structure
 
 ```

@@ -19,6 +19,12 @@ const PLATFORM_LIMITS = {
     label: 'Telegram (GramJS groups)',
     gramjsOnly: true,
   },
+  reddit: {
+    dailyLimit: parseInt(process.env.REDDIT_DAILY_LIMIT || '5', 10),
+    yellowAt: parseInt(process.env.REDDIT_DAILY_YELLOW || '4', 10),
+    label: 'Reddit',
+    fromDeliveries: true,
+  },
   facebookPage: {
     dailyLimit: 10,
     yellowAt: 8,
@@ -29,8 +35,11 @@ const PLATFORM_LIMITS = {
 const result = {};
 for (const [platform, limits] of Object.entries(PLATFORM_LIMITS)) {
   const gramjsOnly = !!limits.gramjsOnly;
-  const { gramjsOnly: _g, ...restLimits } = limits;
-  const count = db.getGroupSendCountToday(platform, gramjsOnly ? { gramjsOnly: true } : {});
+  const fromDeliveries = !!limits.fromDeliveries;
+  const { gramjsOnly: _g, fromDeliveries: _fd, label: _lbl, ...restLimits } = limits;
+  const count = fromDeliveries
+    ? db.getSuccessCountToday(platform)
+    : db.getGroupSendCountToday(platform, gramjsOnly ? { gramjsOnly: true } : {});
   const s = db.getPlatformDailyStatus(platform, {
     ...restLimits,
     countOverride: count,

@@ -443,6 +443,118 @@ def build_telegram_tab(parent):
     return frame
 
 # ─────────────────────────────────────────────
+#  REDDIT TAB
+# ─────────────────────────────────────────────
+def build_reddit_tab(parent):
+    frame = tk.Frame(parent, bg="#f5f5f5")
+
+    rd_status_frame = tk.Frame(frame, bg="#f5f5f5")
+    rd_status_frame.pack(fill="x", padx=15, pady=(8, 0))
+    rd_indicator = tk.Label(rd_status_frame, text="⬤", font=("Arial", 14), bg="#f5f5f5", fg="gray")
+    rd_indicator.pack(side="left")
+    rd_daily_var = tk.StringVar(value="Loading status...")
+    tk.Label(rd_status_frame, textvariable=rd_daily_var, font=("Arial", 9), bg="#f5f5f5", fg="#444").pack(side="left", padx=6)
+    tk.Button(rd_status_frame, text="↻", font=("Arial", 10), bg="#f5f5f5", relief="flat",
+              command=lambda: rd_refresh_status()).pack(side="right")
+
+    def rd_refresh_status():
+        rd_daily_var.set("Checking...")
+        rd_indicator.config(fg="gray")
+        def worker():
+            data = get_platform_status()
+            rd = data.get("reddit", {})
+            color = {"green": "#2e7d32", "yellow": "#f57f17", "red": "#c62828"}.get(rd.get("status"), "gray")
+            rd_indicator.config(fg=color)
+            rd_daily_var.set(rd.get("reason", "Status unavailable"))
+        threading.Thread(target=worker, daemon=True).start()
+
+    rd_status_var = tk.StringVar(value="Ready")
+    tk.Label(frame, textvariable=rd_status_var, font=("Arial", 9, "italic"), bg="#f5f5f5", fg="gray").pack(anchor="w", padx=15, pady=(2, 0))
+
+    tk.Label(
+        frame,
+        text="OAuth + refresh token — see docs/REDDIT_SETUP.md on the VM.",
+        font=("Arial", 9), bg="#f5f5f5", fg="#666", wraplength=500, justify="left",
+    ).pack(anchor="w", padx=15, pady=(4, 0))
+
+    btn_frame = tk.Frame(frame, bg="#f5f5f5")
+    btn_frame.pack(anchor="w", padx=15, pady=8)
+
+    rd_test_status = tk.Label(btn_frame, text="", font=("Arial", 12), bg="#f5f5f5")
+    rd_live_status = tk.Label(btn_frame, text="", font=("Arial", 12), bg="#f5f5f5")
+
+    def do_rd_test():
+        rd_test_status.config(text="⏳", fg="orange")
+        rd_test_btn.config(state="disabled")
+        rd_live_btn.config(state="disabled")
+        rd_status_var.set("Running Reddit test (REDDIT_SUBREDDIT_TEST)...")
+        rd_log_box.config(state="normal")
+        rd_log_box.delete("1.0", tk.END)
+
+        def on_line(line):
+            rd_log_box.config(state="normal")
+            rd_log_box.insert(tk.END, line + "\n")
+            rd_log_box.see(tk.END)
+            rd_log_box.config(state="disabled")
+
+        def on_done(returncode):
+            rd_test_btn.config(state="normal")
+            rd_live_btn.config(state="normal")
+            if returncode == 0:
+                rd_test_status.config(text="✅", fg="green")
+                rd_status_var.set("Reddit test complete.")
+            else:
+                rd_test_status.config(text="❌", fg="red")
+                rd_status_var.set("Reddit test failed. Check log.")
+            rd_refresh_status()
+
+        run_in_background(build_cmd("node scripts/distribute.js --test --platform=reddit"), on_line=on_line, on_done=on_done)
+
+    def do_rd_live():
+        if not messagebox.askyesno("Confirm LIVE Reddit", "Post today’s article link to REDDIT_SUBREDDIT now?"):
+            return
+        rd_live_status.config(text="⏳", fg="orange")
+        rd_test_btn.config(state="disabled")
+        rd_live_btn.config(state="disabled")
+        rd_status_var.set("Running LIVE Reddit post...")
+        rd_log_box.config(state="normal")
+        rd_log_box.delete("1.0", tk.END)
+
+        def on_line(line):
+            rd_log_box.config(state="normal")
+            rd_log_box.insert(tk.END, line + "\n")
+            rd_log_box.see(tk.END)
+            rd_log_box.config(state="disabled")
+
+        def on_done(returncode):
+            rd_test_btn.config(state="normal")
+            rd_live_btn.config(state="normal")
+            if returncode == 0:
+                rd_live_status.config(text="✅", fg="green")
+                rd_status_var.set("Reddit LIVE complete.")
+            else:
+                rd_live_status.config(text="❌", fg="red")
+                rd_status_var.set("Reddit LIVE failed. Check log.")
+            rd_refresh_status()
+
+        run_in_background(build_cmd("node scripts/distribute.js --platform=reddit"), on_line=on_line, on_done=on_done)
+
+    rd_test_btn = tk.Button(btn_frame, text="Test post", command=do_rd_test, width=22, height=2, bg="#fff9c4")
+    rd_live_btn = tk.Button(btn_frame, text="LIVE post", command=do_rd_live, width=22, height=2, bg="#ffcdd2", fg="#b71c1c")
+
+    rd_test_btn.grid(row=0, column=0, sticky="w", pady=3)
+    rd_test_status.grid(row=0, column=1, padx=8)
+    rd_live_btn.grid(row=1, column=0, sticky="w", pady=3)
+    rd_live_status.grid(row=1, column=1, padx=8)
+
+    tk.Label(frame, text="Log:", font=("Arial", 9, "bold"), bg="#f5f5f5").pack(anchor="w", padx=15)
+    rd_log_box = scrolledtext.ScrolledText(frame, height=12, font=("Courier", 8), state="disabled", bg="#1e1e1e", fg="#cccccc")
+    rd_log_box.pack(fill="both", expand=True, padx=15, pady=(2, 10))
+
+    frame.after(500, rd_refresh_status)
+    return frame
+
+# ─────────────────────────────────────────────
 #  PLACEHOLDER TABS
 # ─────────────────────────────────────────────
 def build_placeholder_tab(parent, platform):
@@ -467,10 +579,11 @@ def main():
 
     notebook.add(build_whatsapp_tab(notebook),  text="  WhatsApp  ")
     notebook.add(build_telegram_tab(notebook),  text="  Telegram  ")
+    notebook.add(build_reddit_tab(notebook),    text="  Reddit  ")
     notebook.add(build_placeholder_tab(notebook, "Instagram"), text="  Instagram ")
     notebook.add(build_placeholder_tab(notebook, "Facebook"),  text="  Facebook  ")
 
-    tk.Label(root, text="v1.2", font=("Arial", 7), fg="gray").pack(side="bottom", pady=2)
+    tk.Label(root, text="v1.3", font=("Arial", 7), fg="gray").pack(side="bottom", pady=2)
 
     root.mainloop()
 

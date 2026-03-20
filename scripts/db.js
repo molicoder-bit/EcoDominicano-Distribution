@@ -132,6 +132,11 @@ function getSuccessCountSince(platform, sinceIso) {
   return row ? row.c : 0;
 }
 
+/** Successful deliveries since local midnight (TIMEZONE). */
+function getSuccessCountToday(platform) {
+  return getSuccessCountSince(platform, getTodayStartISO());
+}
+
 function hasDelivered(articleUrl, platform) {
   const row = getDb().prepare(
     'SELECT 1 FROM deliveries WHERE article_url = ? AND platform = ? AND status = ? LIMIT 1'
@@ -254,6 +259,7 @@ module.exports = {
   recordDelivery,
   getLastSuccess,
   getSuccessCountSince,
+  getSuccessCountToday,
   hasDelivered,
   getCooldown,
   setCooldown,
@@ -262,5 +268,6 @@ module.exports = {
   getGroupSendCountToday,
   wasGroupSentToday,
   getPlatformDailyStatus,
+  getTodayStartISO,
   close,
 };
