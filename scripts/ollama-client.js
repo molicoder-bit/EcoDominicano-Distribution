@@ -30,6 +30,10 @@ async function generate(prompt, options = {}) {
     const data = await res.json();
     const text = data.response?.trim() || '';
     if (!text) throw new Error('Ollama returned empty response');
+    // Detect safety refusals so callers can fall back gracefully
+    if (/^(lo siento|i('m| am) sorry|no puedo|i can't|i cannot|no me es posible|disculpa[,\s])/i.test(text)) {
+      throw new Error(`Ollama refused: ${text.slice(0, 120)}`);
+    }
     return text;
   } catch (e) {
     throw new Error(`Ollama generate failed: ${e.message}`);

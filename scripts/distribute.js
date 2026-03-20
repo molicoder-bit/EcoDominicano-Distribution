@@ -51,18 +51,23 @@ function randomBetween(min, max) {
 }
 
 function buildTelegramPrompt(article) {
-  const title = (article.title || 'Sin título').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  return `Eres un dominicano gracioso compartiendo noticias en Telegram. Escribe UN solo mensaje corto, sin comillas, sin introducción, sin explicación.
+  const heavy = isHeavyContent(article);
+  const tone = heavy
+    ? '1-2 oraciones informativas con tono dominicano directo y respetuoso (no humor, no chiste)'
+    : '1-2 oraciones cómicas y dominicanizadas — usa expresiones como "diache", "qué vaina", "ta\' bueno eso", "se formó el despelote", "mano", "brutísimo", etc.';
+  const example = heavy
+    ? `<b>Accidente deja varios heridos en la autopista Duarte</b>\nDiache, otro choque en la Duarte. Varios heridos fueron trasladados al hospital, situación bajo control.\nhttps://ecodominicano.com/ejemplo`
+    : `<b>Apagón deja sin luz a medio Santo Domingo</b>\nDiache mano, otra vez lo mismo 😂 El CDEEE diciendo que "es temporal" desde el 1965. Ta' to' el país rezando pa' que llegue la luz antes de que se dañe el pollo.\nhttps://ecodominicano.com/ejemplo`;
+
+  return `Eres el redactor de EcoDominicano, medio digital dominicano. Tu tarea es escribir UN solo mensaje de Telegram para compartir esta noticia. Sin comillas, sin introducción, sin explicación extra.
 
 FORMATO OBLIGATORIO (usa exactamente estas etiquetas HTML):
 <b>${article.title}</b>
-[1-2 oraciones cómicas y dominicanizadas — usa expresiones como "diache", "qué vaina", "ta' bueno eso", "se formó el despelote", "mano", "brutísimo", etc.]
+[${tone}]
 ${article.url || ''}
 
-EJEMPLO del tono (NO copies este ejemplo):
-<b>Apagón deja sin luz a medio Santo Domingo</b>
-Diache mano, otra vez lo mismo 😂 El CDEEE diciendo que "es temporal" desde el 1965. Ta' to' el país rezando pa' que llegue la luz antes de que se dañe el pollo.
-https://ecodominicano.com/ejemplo
+EJEMPLO del tono (NO copies, solo referencia de estilo):
+${example}
 
 Noticia de hoy:
 Título: ${article.title}
@@ -71,18 +76,31 @@ Resumen: ${article.summary || article.title}
 Escribe el mensaje ahora (solo el mensaje, nada más):`;
 }
 
-function buildNewsPrompt(article) {
-  return `Eres un dominicano gracioso compartiendo noticias en WhatsApp. Escribe UN solo mensaje corto, sin comillas, sin introducción, sin explicación.
+function isHeavyContent(article) {
+  // Normalize accents so "disparó"→"disparo", "murió"→"murio", etc.
+  const normalize = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const text = normalize(`${article.title} ${article.summary || ''}`);
+  return /muert|mato |mato$|matan|asesin|dispar|homicid|falleci|victima|tragedia|accidente fatal|violaci|secuestr|crimen|delito|balacera|herido|policia.*abat|abat.*policia/.test(text);
+}
 
-FORMATO OBLIGATORIO (copia exacto, solo cambia el contenido entre corchetes):
+function buildNewsPrompt(article) {
+  const heavy = isHeavyContent(article);
+  const tone = heavy
+    ? '1-2 oraciones informativas con tono dominicano directo y respetuoso (no humor, no chiste)'
+    : '1-2 oraciones cómicas y dominicanizadas — usa expresiones como "diache", "qué vaina", "ta\' bueno eso", "se formó el despelote", "mano", "brutísimo", etc.';
+  const example = heavy
+    ? `*Accidente deja varios heridos en la autopista Duarte*\nDiache, otro choque en la Duarte. Varios heridos fueron trasladados al hospital, situación bajo control según las autoridades.\nhttps://ecodominicano.com/ejemplo`
+    : `*Apagón deja sin luz a medio Santo Domingo*\nDiache mano, otra vez lo mismo 😂 El CDEEE diciendo que "es temporal" desde el 1965. Ta' to' el país rezando pa' que llegue la luz antes de que se dañe el pollo.\nhttps://ecodominicano.com/ejemplo`;
+
+  return `Eres el redactor de EcoDominicano, medio digital dominicano. Tu tarea es escribir UN solo mensaje de WhatsApp para compartir esta noticia. Sin comillas, sin introducción, sin explicación extra.
+
+FORMATO OBLIGATORIO:
 *${article.title}*
-[1-2 oraciones cómicas y dominicanizadas contando de qué va la nota — usa expresiones como "diache", "qué vaina", "ta' bueno eso", "se formó el despelote", "mano", "brutísimo", etc.]
+[${tone}]
 ${article.url || ''}
 
-EJEMPLO del tono (NO copies este ejemplo, es solo para que veas el estilo):
-*Apagón deja sin luz a medio Santo Domingo*
-Diache mano, otra vez lo mismo 😂 El CDEEE diciendo que "es temporal" desde el 1965. Ta' to' el país rezando pa' que llegue la luz antes de que se dañe el pollo.
-https://ecodominicano.com/ejemplo
+EJEMPLO del tono (NO copies, solo referencia de estilo):
+${example}
 
 Noticia de hoy:
 Título: ${article.title}
