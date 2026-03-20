@@ -69,6 +69,19 @@ def get_platform_status():
     except Exception:
         return {}
 
+def get_ollama_status():
+    """
+    Ping Ollama /api/tags from the VM side.
+    Returns (ok: bool, reason: str).
+    """
+    try:
+        cmd = build_cmd("node scripts/ollama-health.js")
+        result = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True, timeout=10)
+        data = json.loads(result.stdout)
+        return data.get("ok", False), data.get("reason", "unknown")
+    except Exception as e:
+        return False, str(e)
+
 def build_whatsapp_tab(parent):
     frame = tk.Frame(parent, bg="#f5f5f5")
 
@@ -572,7 +585,29 @@ def main():
     root.geometry("560x600")
     root.resizable(True, True)
 
-    tk.Label(root, text="EcoDominicano Distributor", font=("Arial", 14, "bold")).pack(pady=8)
+    header_frame = tk.Frame(root, bg="white")
+    header_frame.pack(fill="x", padx=0, pady=0)
+    tk.Label(header_frame, text="EcoDominicano Distributor", font=("Arial", 14, "bold"), bg="white").pack(side="left", padx=12, pady=8)
+
+    # Ollama status badge (top-right)
+    ollama_badge_frame = tk.Frame(header_frame, bg="white")
+    ollama_badge_frame.pack(side="right", padx=12, pady=6)
+    ollama_dot = tk.Label(ollama_badge_frame, text="⬤", font=("Arial", 10), bg="white", fg="gray")
+    ollama_dot.pack(side="left")
+    ollama_label = tk.Label(ollama_badge_frame, text="Ollama: checking...", font=("Arial", 8), bg="white", fg="#555")
+    ollama_label.pack(side="left", padx=4)
+
+    def refresh_ollama_badge():
+        def worker():
+            ok, reason = get_ollama_status()
+            color = "#2e7d32" if ok else "#c62828"
+            text = f"Ollama: {reason}"
+            ollama_dot.config(fg=color)
+            ollama_label.config(text=text)
+        threading.Thread(target=worker, daemon=True).start()
+        root.after(60000, refresh_ollama_badge)  # re-check every 60s
+
+    root.after(800, refresh_ollama_badge)
 
     notebook = ttk.Notebook(root)
     notebook.pack(expand=True, fill="both", padx=8, pady=4)
